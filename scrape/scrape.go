@@ -266,7 +266,7 @@ const maxAheadTime = 10 * time.Minute
 
 type labelsMutator func(labels.Labels) labels.Labels
 
-func newScrapePool(cfg *config.ScrapeConfig, app storage.Appendable, jitterSeed uint64, logger log.Logger, reportExtraMetrics bool, httpOpts []config_util.HTTPClientOption) (*scrapePool, error) {
+func newScrapePool(cfg *config.ScrapeConfig, app storage.Appendable, jitterSeed uint64, logger log.Logger, reportExtraMetrics bool, httpOpts []config_util.HTTPClientOption, useInterner bool) (*scrapePool, error) {
 	targetScrapePools.Inc()
 	if logger == nil {
 		logger = log.NewNopLogger()
@@ -295,7 +295,7 @@ func newScrapePool(cfg *config.ScrapeConfig, app storage.Appendable, jitterSeed 
 		// Update the targets retrieval function for metadata to a new scrape cache.
 		cache := opts.cache
 		if cache == nil {
-			cache = newScrapeCache(intern.Global)
+			cache = newScrapeCache(useInterner, intern.Global)
 		}
 		opts.target.SetMetadataStore(cache)
 
@@ -321,6 +321,7 @@ func newScrapePool(cfg *config.ScrapeConfig, app storage.Appendable, jitterSeed 
 			opts.interval,
 			opts.timeout,
 			reportExtraMetrics,
+			useInterner,
 		)
 	}
 
@@ -382,7 +383,7 @@ func (sp *scrapePool) stop() {
 // reload the scrape pool with the given scrape configuration. The target state is preserved
 // but all scrape loops are restarted with the new scrape configuration.
 // This method returns after all scrape loops that were stopped have stopped scraping.
-func (sp *scrapePool) reload(cfg *config.ScrapeConfig) error {
+func (sp *scrapePool) reload(cfg *config.ScrapeConfig, useInterner bool) error {
 	sp.mtx.Lock()
 	defer sp.mtx.Unlock()
 	targetScrapePoolReloads.Inc()
@@ -426,7 +427,7 @@ func (sp *scrapePool) reload(cfg *config.ScrapeConfig) error {
 			oldLoop.disableEndOfRunStalenessMarkers()
 			cache = oc
 		} else {
-			cache = newScrapeCache(intern.Global)
+			cache = newScrapeCache(useInterner, intern.Global)
 		}
 
 		var (
@@ -898,7 +899,8 @@ type scrapeCache struct {
 	metaMtx  sync.Mutex
 	metadata map[string]*metaEntry
 
-	interner intern.Interner
+	useInterner bool
+	interner    intern.Interner
 }
 
 // metaEntry holds meta information about a metric.
@@ -914,7 +916,7 @@ func (m *metaEntry) size() int {
 	return len(m.help) + len(m.unit) + len(m.typ)
 }
 
-func newScrapeCache(interner intern.Interner) *scrapeCache {
+func newScrapeCache(useInterner bool, interner intern.Interner) *scrapeCache {
 	if interner == nil {
 		interner = intern.Global
 	}
@@ -924,6 +926,7 @@ func newScrapeCache(interner intern.Interner) *scrapeCache {
 		seriesCur:     map[uint64]*cacheEntry{},
 		seriesPrev:    map[uint64]*cacheEntry{},
 		metadata:      map[string]*metaEntry{},
+		useInterner:   useInterner,
 		interner:      interner,
 	}
 }
@@ -951,7 +954,9 @@ func (c *scrapeCache) iterDone(flushCache bool) {
 		// that haven't appeared in the last scrape.
 		for s, e := range c.series {
 			if c.iter != e.lastIter {
-				intern.ReleaseLabels(c.interner, e.lset)
+				if c.useInterner {
+					intern.ReleaseLabels(c.interner, e.lset)
+				}
 				delete(c.series, s)
 			}
 		}
@@ -993,7 +998,9 @@ func (c *scrapeCache) get(met string) (*cacheEntry, bool) {
 func (c *scrapeCache) addRef(met string, ref storage.SeriesRef, lset labels.Labels, hash uint64) *cacheEntry {
 	// The cache entries are used for staleness tracking so even if ref is
 	// 0 we need to track it.
-	intern.InternLabels(c.interner, lset)
+	if c.useInterner {
+		intern.InternLabels(c.interner, lset)
+	}
 
 	ce := &cacheEntry{ref: ref, lastIter: c.iter, lset: lset, hash: hash}
 	c.series[met] = ce
@@ -1140,6 +1147,7 @@ func newScrapeLoop(ctx context.Context,
 	interval time.Duration,
 	timeout time.Duration,
 	reportExtraMetrics bool,
+	useStringInterner bool,
 ) *scrapeLoop {
 	if l == nil {
 		l = log.NewNopLogger()
@@ -1148,7 +1156,7 @@ func newScrapeLoop(ctx context.Context,
 		buffers = pool.New(1e3, 1e6, 3, func(sz int) interface{} { return make([]byte, 0, sz) })
 	}
 	if cache == nil {
-		cache = newScrapeCache(intern.Global)
+		cache = newScrapeCache(useStringInterner, intern.Global)
 	}
 	sl := &scrapeLoop{
 		scraper:             sc,
