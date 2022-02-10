@@ -66,6 +66,16 @@ message TimeSeries {
   string help             = 6;
 }
 
+  enum MetricType {
+    UNKNOWN        = 0;
+    COUNTER        = 1;
+    GAUGE          = 2;
+    HISTOGRAM      = 3;
+    GAUGEHISTOGRAM = 4;
+    SUMMARY        = 5;
+    INFO           = 6;
+    STATESET       = 7;
+  }
 message Label {
   string name  = 1;
   string value = 2;
