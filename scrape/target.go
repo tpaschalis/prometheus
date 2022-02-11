@@ -28,6 +28,7 @@ import (
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/prometheus/prometheus/model/textparse"
 	"github.com/prometheus/prometheus/model/value"
@@ -316,14 +317,14 @@ type limitAppender struct {
 	i     int
 }
 
-func (app *limitAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
+func (app *limitAppender) Append(ref storage.SeriesRef, lset labels.Labels, meta metadata.Metadata, t int64, v float64) (storage.SeriesRef, error) {
 	if !value.IsStaleNaN(v) {
 		app.i++
 		if app.i > app.limit {
 			return 0, errSampleLimit
 		}
 	}
-	ref, err := app.Appender.Append(ref, lset, t, v)
+	ref, err := app.Appender.Append(ref, lset, meta, t, v)
 	if err != nil {
 		return 0, err
 	}
@@ -336,12 +337,12 @@ type timeLimitAppender struct {
 	maxTime int64
 }
 
-func (app *timeLimitAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
+func (app *timeLimitAppender) Append(ref storage.SeriesRef, lset labels.Labels, meta metadata.Metadata, t int64, v float64) (storage.SeriesRef, error) {
 	if t > app.maxTime {
 		return 0, storage.ErrOutOfBounds
 	}
 
-	ref, err := app.Appender.Append(ref, lset, t, v)
+	ref, err := app.Appender.Append(ref, lset, meta, t, v)
 	if err != nil {
 		return 0, err
 	}

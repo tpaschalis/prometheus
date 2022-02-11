@@ -42,6 +42,7 @@ import (
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/prometheus/prometheus/model/textparse"
 	"github.com/prometheus/prometheus/model/timestamp"
@@ -1523,7 +1524,10 @@ loop:
 			}
 		}
 
-		ref, err = app.Append(ref, lset, t, v)
+		// TODO: Wire in actual metadata
+		meta := metadata.EmptyMetadata()
+
+		ref, err = app.Append(ref, lset, meta, t, v)
 		sampleAdded, err = sl.checkAddError(ce, met, tp, err, &sampleLimitErr, &appErrs)
 		if err != nil {
 			if err != storage.ErrNotFound {
@@ -1580,10 +1584,14 @@ loop:
 	if appErrs.numExemplarOutOfOrder > 0 {
 		level.Warn(sl.l).Log("msg", "Error on ingesting out-of-order exemplars", "num_dropped", appErrs.numExemplarOutOfOrder)
 	}
+
+	// TODO: Wire in actual metadata
+	meta := metadata.EmptyMetadata()
+
 	if err == nil {
 		sl.cache.forEachStale(func(lset labels.Labels) bool {
 			// Series no longer exposed, mark it stale.
-			_, err = app.Append(0, lset, defTime, math.Float64frombits(value.StaleNaN))
+			_, err = app.Append(0, lset, meta, defTime, math.Float64frombits(value.StaleNaN))
 			switch errors.Cause(err) {
 			case storage.ErrOutOfOrderSample, storage.ErrDuplicateSampleForTimestamp:
 				// Do not count these in logging, as this is expected if a target
@@ -1753,7 +1761,10 @@ func (sl *scrapeLoop) addReportSample(app storage.Appender, s string, t int64, v
 		lset = sl.reportSampleMutator(lset)
 	}
 
-	ref, err := app.Append(ref, lset, t, v)
+	// TODO: Wire in actual metadata
+	meta := metadata.EmptyMetadata()
+
+	ref, err := app.Append(ref, lset, meta, t, v)
 	switch errors.Cause(err) {
 	case nil:
 		if !ok {

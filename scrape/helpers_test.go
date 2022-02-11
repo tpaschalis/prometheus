@@ -19,6 +19,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/storage"
 )
 
@@ -30,7 +31,7 @@ func (a nopAppendable) Appender(_ context.Context) storage.Appender {
 
 type nopAppender struct{}
 
-func (a nopAppender) Append(storage.SeriesRef, labels.Labels, int64, float64) (storage.SeriesRef, error) {
+func (a nopAppender) Append(storage.SeriesRef, labels.Labels, metadata.Metadata, int64, float64) (storage.SeriesRef, error) {
 	return 0, nil
 }
 
@@ -57,7 +58,7 @@ type collectResultAppender struct {
 	resultExemplars  []exemplar.Exemplar
 }
 
-func (a *collectResultAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
+func (a *collectResultAppender) Append(ref storage.SeriesRef, lset labels.Labels, meta metadata.Metadata, t int64, v float64) (storage.SeriesRef, error) {
 	a.pendingResult = append(a.pendingResult, sample{
 		metric: lset,
 		t:      t,
@@ -71,7 +72,7 @@ func (a *collectResultAppender) Append(ref storage.SeriesRef, lset labels.Labels
 		return ref, nil
 	}
 
-	ref, err := a.next.Append(ref, lset, t, v)
+	ref, err := a.next.Append(ref, lset, meta, t, v)
 	if err != nil {
 		return 0, err
 	}

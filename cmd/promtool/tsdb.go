@@ -39,6 +39,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	tsdb_errors "github.com/prometheus/prometheus/tsdb/errors"
@@ -202,6 +203,9 @@ func (b *writeBenchmark) ingestScrapesShard(lbls []labels.Labels, scrapeCount in
 	}
 	total := uint64(0)
 
+	// TODO: Wire in actual metadata
+	meta := metadata.EmptyMetadata()
+
 	for i := 0; i < scrapeCount; i++ {
 		app := b.storage.Appender(context.TODO())
 		ts += timeDelta
@@ -214,7 +218,7 @@ func (b *writeBenchmark) ingestScrapesShard(lbls []labels.Labels, scrapeCount in
 				ref = *s.ref
 			}
 
-			ref, err := app.Append(ref, s.labels, ts, float64(s.value))
+			ref, err := app.Append(ref, s.labels, meta, ts, float64(s.value))
 			if err != nil {
 				panic(err)
 			}

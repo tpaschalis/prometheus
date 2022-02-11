@@ -27,6 +27,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/prompb"
 	"github.com/prometheus/prometheus/storage"
 )
@@ -159,7 +160,8 @@ func (m *mockAppendable) Appender(_ context.Context) storage.Appender {
 	return m
 }
 
-func (m *mockAppendable) Append(_ storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
+// TODO Check if we need to add metadata to mockSample above
+func (m *mockAppendable) Append(_ storage.SeriesRef, l labels.Labels, meta metadata.Metadata, t int64, v float64) (storage.SeriesRef, error) {
 	if t < m.latestSample {
 		return 0, storage.ErrOutOfOrderSample
 	}

@@ -40,6 +40,7 @@ import (
 	"github.com/prometheus/prometheus/discovery/targetgroup"
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/model/relabel"
 	"github.com/prometheus/prometheus/model/textparse"
 	"github.com/prometheus/prometheus/model/timestamp"
@@ -1964,7 +1965,7 @@ type errorAppender struct {
 	collectResultAppender
 }
 
-func (app *errorAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
+func (app *errorAppender) Append(ref storage.SeriesRef, lset labels.Labels, meta metadata.Metadata, t int64, v float64) (storage.SeriesRef, error) {
 	switch lset.Get(model.MetricNameLabel) {
 	case "out_of_order":
 		return 0, storage.ErrOutOfOrderSample
@@ -1973,7 +1974,7 @@ func (app *errorAppender) Append(ref storage.SeriesRef, lset labels.Labels, t in
 	case "out_of_bounds":
 		return 0, storage.ErrOutOfBounds
 	default:
-		return app.collectResultAppender.Append(ref, lset, t, v)
+		return app.collectResultAppender.Append(ref, lset, meta, t, v)
 	}
 }
 
