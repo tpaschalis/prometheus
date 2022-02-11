@@ -226,6 +226,7 @@ type headAppender struct {
 	mint, maxt   int64
 
 	series       []record.RefSeries      // New series held by this appender.
+	metadata     []record.RefMetadata    // New metadata held by this appender.
 	samples      []record.RefSample      // New samples held by this appender.
 	exemplars    []exemplarWithSeriesRef // New exemplars held by this appender.
 	sampleSeries []*memSeries            // Series corresponding to the samples held by this appender (using corresponding slice indices - same series may appear more than once).
@@ -266,7 +267,25 @@ func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, meta me
 		}
 	}
 
+	// (Q from cstyan) this block will result in whatever the last seen metadata
+	// for a series (based on labelset hash) was being used as the metadata for
+	// an entire block, is that right?
+	hasNewMetadata := false
+
 	s.Lock()
+	if s.typ != meta.Type {
+		hasNewMetadata = true
+		s.typ = meta.Type
+	}
+	if s.unit != meta.Unit {
+		hasNewMetadata = true
+		s.unit = meta.Unit
+	}
+	if s.help != meta.Help {
+		hasNewMetadata = true
+		s.help = meta.Help
+	}
+
 	if err := s.appendable(t, v); err != nil {
 		s.Unlock()
 		if err == storage.ErrOutOfOrderSample {
@@ -290,6 +309,15 @@ func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, meta me
 		V:   v,
 	})
 	a.sampleSeries = append(a.sampleSeries, s)
+	if hasNewMetadata {
+		a.metadata = append(a.metadata, record.RefMetadata{
+			Ref:  s.ref,
+			Type: s.typ,
+			Unit: s.unit,
+			Help: s.help,
+		})
+	}
+
 	return storage.SeriesRef(s.ref), nil
 }
 
@@ -380,6 +408,14 @@ func (a *headAppender) log() error {
 
 		if err := a.head.wal.Log(rec); err != nil {
 			return errors.Wrap(err, "log series")
+		}
+	}
+	if len(a.metadata) > 0 {
+		rec = enc.Metadata(a.metadata, buf)
+		buf = rec[:0]
+
+		if err := a.head.wal.Log(rec); err != nil {
+			return errors.Wrap(err, "log metadata")
 		}
 	}
 	if len(a.samples) > 0 {

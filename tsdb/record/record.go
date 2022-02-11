@@ -22,6 +22,7 @@ import (
 	"github.com/pkg/errors"
 
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/textparse"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	"github.com/prometheus/prometheus/tsdb/encoding"
@@ -58,6 +59,14 @@ type RefSample struct {
 	Ref chunks.HeadSeriesRef
 	T   int64
 	V   float64
+}
+
+// RefMetadata is the series metadata.
+type RefMetadata struct {
+	Ref  chunks.HeadSeriesRef
+	Type textparse.MetricType
+	Unit string
+	Help string
 }
 
 // RefExemplar is an exemplar with it's labels, timestamp, value the exemplar was collected/observed with, and a reference to a series.
@@ -241,6 +250,12 @@ func (e *Encoder) Series(series []RefSeries, b []byte) []byte {
 			buf.PutUvarintStr(l.Value)
 		}
 	}
+	return buf.Get()
+}
+
+// Metadata appends the encoded metadata to b and returns the resulting slice.
+func (e *Encoder) Metadata(metadata []RefMetadata, b []byte) []byte {
+	buf := encoding.Encbuf{B: b}
 	return buf.Get()
 }
 
