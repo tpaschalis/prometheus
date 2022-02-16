@@ -1437,6 +1437,7 @@ func (sl *scrapeLoop) append(app storage.Appender, b []byte, contentType string,
 		appErrs        = appendErrors{}
 		sampleLimitErr error
 		e              exemplar.Exemplar // escapes to heap so hoisted out of loop
+		meta           metadata.Metadata
 	)
 
 	// Take an appender with limits.
@@ -1488,6 +1489,14 @@ loop:
 			t = *tp
 		}
 
+		// Zero metadata out until resolved, must be done since
+		// we use a pointer later to avoid copying arg by stack for
+		// low function call overhead and thus need to declare the local var
+		// above the loop so that it does not get allocated per
+		// entry in the scrape (which could happen if we took by pointer
+		// and declared the local var inside the for loop).
+		meta = metadata.Metadata{}
+
 		if sl.cache.getDropped(yoloString(met)) {
 			continue
 		}
@@ -1502,6 +1511,7 @@ loop:
 		if ok {
 			ref = ce.ref
 			lset = ce.lset
+			meta = ce.meta
 		} else {
 			mets = p.Metric(&lset)
 			hash = lset.Hash()
@@ -1526,10 +1536,23 @@ loop:
 				targetScrapePoolExceededLabelLimits.Inc()
 				break loop
 			}
-		}
 
-		// TODO: Wire in actual metadata
-		meta := metadata.EmptyMetadata()
+			sl.cache.metaMtx.Lock()
+			metaEntry, metaOk := sl.cache.metadata[yoloString(met)]
+			if metaOk {
+				// Originally, the approach in #7771 was to keep lastIterObserved(Type|Unit|Help) fields
+				// and only set the metadata that was specified in _this_ iteration. If any other gields were not
+				// specified, they were treated as zeroed. We have to understand whether we actually need to use this approach
+				// and also take the same approach in the `if ok{` block above.
+				//if metaEntry.lastIterObservedType == currIter {
+				//if metaEntry.lastIterObservedUnit == currIter {
+				//if metaEntry.lastIterObservedHelp == currIter {
+				meta.Type = metaEntry.typ
+				meta.Unit = metaEntry.unit
+				meta.Help = metaEntry.help
+			}
+			sl.cache.metaMtx.Unlock()
+		}
 
 		ref, err = app.Append(ref, lset, meta, t, v)
 		sampleAdded, err = sl.checkAddError(ce, met, tp, err, &sampleLimitErr, &appErrs)
