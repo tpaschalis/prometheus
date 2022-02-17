@@ -278,24 +278,7 @@ func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64
 		}
 	}
 
-	// (Q from cstyan) this block will result in whatever the last seen metadata
-	// for a series (based on labelset hash) was being used as the metadata for
-	// an entire block, is that right?
-	// hasNewMetadata := false
-
 	s.Lock()
-	// if s.typ != meta.Type {
-	// 	hasNewMetadata = true
-	// 	s.typ = meta.Type
-	// }
-	// if s.unit != meta.Unit {
-	// 	hasNewMetadata = true
-	// 	s.unit = meta.Unit
-	// }
-	// if s.help != meta.Help {
-	// 	hasNewMetadata = true
-	// 	s.help = meta.Help
-	// }
 
 	if err := s.appendable(t, v); err != nil {
 		s.Unlock()
@@ -320,14 +303,6 @@ func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64
 		V:   v,
 	})
 	a.sampleSeries = append(a.sampleSeries, s)
-	// if hasNewMetadata {
-	// 	a.metadata = append(a.metadata, record.RefMetadata{
-	// 		Ref:  s.ref,
-	// 		Type: s.typ,
-	// 		Unit: s.unit,
-	// 		Help: s.help,
-	// 	})
-	// }
 
 	return storage.SeriesRef(s.ref), nil
 }
@@ -390,8 +365,44 @@ func (a *headAppender) AppendExemplar(ref storage.SeriesRef, lset labels.Labels,
 	return storage.SeriesRef(s.ref), nil
 }
 
-func (a *headAppender) AppendMetadata(ref storage.SeriesRef, m metadata.Metadata) (storage.SeriesRef, error) {
-	// TODO: Wire in actual metadata handling
+func (a *headAppender) AppendMetadata(ref storage.SeriesRef, meta metadata.Metadata) (storage.SeriesRef, error) {
+
+	// Get Series
+	s := a.head.series.getByID(chunks.HeadSeriesRef(ref))
+
+	// TODO: Do we need to add label set so we can get series by their hash?
+	// if s == nil {
+	// 	s = a.head.series.getByHash(lset.Hash(), lset)
+	// 	if s != nil {
+	// 		ref = storage.SeriesRef(s.ref)
+	// 	}
+	// }
+
+	if s == nil {
+		return 0, fmt.Errorf("unknown HeadSeriesRef when trying to add metadata: %d", ref)
+	}
+
+	// (Q from cstyan) this block will result in whatever the last seen metadata
+	// for a series (based on labelset hash) was being used as the metadata for
+	// an entire block, is that right?
+	hasNewMetadata := false
+
+	s.Lock()
+	if s.meta != meta {
+		hasNewMetadata = true
+		s.meta = meta
+	}
+	s.Unlock()
+
+	if hasNewMetadata {
+		a.metadata = append(a.metadata, record.RefMetadata{
+			Ref:  s.ref,
+			Type: s.meta.Type,
+			Unit: s.meta.Unit,
+			Help: s.meta.Help,
+		})
+	}
+
 	return ref, nil
 }
 
@@ -661,6 +672,7 @@ func (a *headAppender) Rollback() (err error) {
 	a.head.putExemplarBuffer(a.exemplars)
 	a.samples = nil
 	a.exemplars = nil
+	a.metadata = nil
 
 	// Series are created in the head memory regardless of rollback. Thus we have
 	// to log them to the WAL in any case.
