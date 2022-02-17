@@ -200,6 +200,19 @@ func (h *Head) putExemplarBuffer(b []exemplarWithSeriesRef) {
 	h.exemplarsPool.Put(b[:0])
 }
 
+func (h *Head) getMetadataBuffer() []record.RefMetadata {
+	b := h.metadataPool.Get()
+	if b == nil {
+		return make([]record.RefMetadata, 0, 512)
+	}
+	return b.([]record.RefMetadata)
+}
+
+func (h *Head) putMetadataBuffer(b []record.RefMetadata) {
+	//nolint:staticcheck // Ignore SA6002 safe to ignore and actually fixing it has some performance penalty.
+	h.metadataPool.Put(b[:0])
+}
+
 func (h *Head) getSeriesBuffer() []*memSeries {
 	b := h.seriesPool.Get()
 	if b == nil {
@@ -504,6 +517,7 @@ func (a *headAppender) Commit() (err error) {
 	defer a.head.putAppendBuffer(a.samples)
 	defer a.head.putSeriesBuffer(a.sampleSeries)
 	defer a.head.putExemplarBuffer(a.exemplars)
+	defer a.head.putMetadataBuffer(a.metadata)
 	defer a.head.iso.closeAppend(a.appendID)
 
 	total := len(a.samples)
@@ -669,6 +683,7 @@ func (a *headAppender) Rollback() (err error) {
 	}
 	a.head.putAppendBuffer(a.samples)
 	a.head.putExemplarBuffer(a.exemplars)
+	a.head.putMetadataBuffer(a.metadata)
 	a.samples = nil
 	a.exemplars = nil
 	a.metadata = nil

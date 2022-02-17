@@ -1662,7 +1662,7 @@ func (sl *scrapeLoop) checkAddError(ce *cacheEntry, met []byte, tp *int64, err e
 	switch errors.Cause(err) {
 	case nil:
 		if tp == nil && ce != nil {
-			sl.cache.trackStaleness(ce.hash, ce.lset, ce.meta)
+			sl.cache.trackStaleness(ce.hash, ce.lset)
 		}
 		return true, nil
 	case storage.ErrNotFound:
