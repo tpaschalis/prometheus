@@ -39,14 +39,14 @@ type initAppender struct {
 
 var _ storage.GetRef = &initAppender{}
 
-func (a *initAppender) Append(ref storage.SeriesRef, lset labels.Labels, meta metadata.Metadata, t int64, v float64) (storage.SeriesRef, error) {
+func (a *initAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	if a.app != nil {
-		return a.app.Append(ref, lset, meta, t, v)
+		return a.app.Append(ref, lset, t, v)
 	}
 
 	a.head.initTime(t)
 	a.app = a.head.appender()
-	return a.app.Append(ref, lset, meta, t, v)
+	return a.app.Append(ref, lset, t, v)
 }
 
 func (a *initAppender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e exemplar.Exemplar) (storage.SeriesRef, error) {
@@ -64,6 +64,17 @@ func (a *initAppender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e 
 	a.app = a.head.appender()
 
 	return a.app.AppendExemplar(ref, l, e)
+}
+
+func (a *initAppender) AppendMetadata(ref storage.SeriesRef, m metadata.Metadata) (storage.SeriesRef, error) {
+	if a.app != nil {
+		return a.app.AppendMetadata(ref, m)
+	}
+
+	// TODO check if we'll be keeping track of time here as well.
+	// a.head.initTime(t)
+	a.app = a.head.appender()
+	return a.app.AppendMetadata(ref, m)
 }
 
 // initTime initializes a head with the first timestamp. This only needs to be called
@@ -235,7 +246,7 @@ type headAppender struct {
 	closed                          bool
 }
 
-func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, meta metadata.Metadata, t int64, v float64) (storage.SeriesRef, error) {
+func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	if t < a.minValidTime {
 		a.head.metrics.outOfBoundSamples.Inc()
 		return 0, storage.ErrOutOfBounds
@@ -270,21 +281,21 @@ func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, meta me
 	// (Q from cstyan) this block will result in whatever the last seen metadata
 	// for a series (based on labelset hash) was being used as the metadata for
 	// an entire block, is that right?
-	hasNewMetadata := false
+	// hasNewMetadata := false
 
 	s.Lock()
-	if s.typ != meta.Type {
-		hasNewMetadata = true
-		s.typ = meta.Type
-	}
-	if s.unit != meta.Unit {
-		hasNewMetadata = true
-		s.unit = meta.Unit
-	}
-	if s.help != meta.Help {
-		hasNewMetadata = true
-		s.help = meta.Help
-	}
+	// if s.typ != meta.Type {
+	// 	hasNewMetadata = true
+	// 	s.typ = meta.Type
+	// }
+	// if s.unit != meta.Unit {
+	// 	hasNewMetadata = true
+	// 	s.unit = meta.Unit
+	// }
+	// if s.help != meta.Help {
+	// 	hasNewMetadata = true
+	// 	s.help = meta.Help
+	// }
 
 	if err := s.appendable(t, v); err != nil {
 		s.Unlock()
@@ -309,14 +320,14 @@ func (a *headAppender) Append(ref storage.SeriesRef, lset labels.Labels, meta me
 		V:   v,
 	})
 	a.sampleSeries = append(a.sampleSeries, s)
-	if hasNewMetadata {
-		a.metadata = append(a.metadata, record.RefMetadata{
-			Ref:  s.ref,
-			Type: s.typ,
-			Unit: s.unit,
-			Help: s.help,
-		})
-	}
+	// if hasNewMetadata {
+	// 	a.metadata = append(a.metadata, record.RefMetadata{
+	// 		Ref:  s.ref,
+	// 		Type: s.typ,
+	// 		Unit: s.unit,
+	// 		Help: s.help,
+	// 	})
+	// }
 
 	return storage.SeriesRef(s.ref), nil
 }
@@ -377,6 +388,11 @@ func (a *headAppender) AppendExemplar(ref storage.SeriesRef, lset labels.Labels,
 	a.exemplars = append(a.exemplars, exemplarWithSeriesRef{ref, e})
 
 	return storage.SeriesRef(s.ref), nil
+}
+
+func (a *headAppender) AppendMetadata(ref storage.SeriesRef, m metadata.Metadata) (storage.SeriesRef, error) {
+	// TODO: Wire in actual metadata handling
+	return ref, nil
 }
 
 var _ storage.GetRef = &headAppender{}

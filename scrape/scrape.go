@@ -1554,7 +1554,7 @@ loop:
 			sl.cache.metaMtx.Unlock()
 		}
 
-		ref, err = app.Append(ref, lset, meta, t, v)
+		ref, err = app.Append(ref, lset, t, v)
 		sampleAdded, err = sl.checkAddError(ce, met, tp, err, &sampleLimitErr, &appErrs)
 		if err != nil {
 			if err != storage.ErrNotFound {
@@ -1613,9 +1613,10 @@ loop:
 	}
 
 	if err == nil {
+		// TODO: Do we still need metadata as an argument here?
 		sl.cache.forEachStale(func(lset labels.Labels, meta metadata.Metadata) bool {
 			// Series no longer exposed, mark it stale.
-			_, err = app.Append(0, lset, meta, defTime, math.Float64frombits(value.StaleNaN))
+			_, err = app.Append(0, lset, defTime, math.Float64frombits(value.StaleNaN))
 			switch errors.Cause(err) {
 			case storage.ErrOutOfOrderSample, storage.ErrDuplicateSampleForTimestamp:
 				// Do not count these in logging, as this is expected if a target
@@ -1785,14 +1786,11 @@ func (sl *scrapeLoop) addReportSample(app storage.Appender, s string, t int64, v
 		lset = sl.reportSampleMutator(lset)
 	}
 
-	// TODO: Wire in actual metadata
-	meta := metadata.EmptyMetadata()
-
-	ref, err := app.Append(ref, lset, meta, t, v)
+	ref, err := app.Append(ref, lset, t, v)
 	switch errors.Cause(err) {
 	case nil:
 		if !ok {
-			sl.cache.addRef(s, ref, lset, *m, lset.Hash())
+			sl.cache.addRef(s, ref, lset, metadata.EmptyMetadata(), lset.Hash())
 		}
 		return nil
 	case storage.ErrOutOfOrderSample, storage.ErrDuplicateSampleForTimestamp:

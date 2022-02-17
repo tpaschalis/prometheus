@@ -20,7 +20,6 @@ import (
 
 	"github.com/go-kit/log"
 
-	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/storage"
 )
 
@@ -48,14 +47,13 @@ func CreateBlock(series []storage.Series, dir string, chunkRange int64, logger l
 	ctx := context.Background()
 	app := w.Appender(ctx)
 
-	// TODO: add actual metadata per-series in Append below
 	for _, s := range series {
 		ref := storage.SeriesRef(0)
 		it := s.Iterator()
 		lset := s.Labels()
 		for it.Next() {
 			t, v := it.At()
-			ref, err = app.Append(ref, lset, metadata.EmptyMetadata(), t, v)
+			ref, err = app.Append(ref, lset, t, v)
 			if err != nil {
 				return "", err
 			}

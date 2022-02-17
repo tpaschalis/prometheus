@@ -29,7 +29,6 @@ import (
 
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/prometheus/prometheus/promql/parser"
 	"github.com/prometheus/prometheus/storage"
@@ -319,11 +318,9 @@ func (cmd *loadCmd) set(m labels.Labels, vals ...parser.SequenceValue) {
 func (cmd *loadCmd) append(a storage.Appender) error {
 	for h, smpls := range cmd.defs {
 		m := cmd.metrics[h]
-		// TODO: Wire in actual metadata
-		meta := metadata.EmptyMetadata()
 
 		for _, s := range smpls {
-			if _, err := a.Append(0, m, meta, s.T, s.V); err != nil {
+			if _, err := a.Append(0, m, s.T, s.V); err != nil {
 				return err
 			}
 		}
@@ -754,15 +751,13 @@ func (ll *LazyLoader) appendTill(ts int64) error {
 	app := ll.storage.Appender(ll.Context())
 	for h, smpls := range ll.loadCmd.defs {
 		m := ll.loadCmd.metrics[h]
-		// TODO: Wire in actual metadata
-		meta := metadata.EmptyMetadata()
 		for i, s := range smpls {
 			if s.T > ts {
 				// Removing the already added samples.
 				ll.loadCmd.defs[h] = smpls[i:]
 				break
 			}
-			if _, err := app.Append(0, m, meta, s.T, s.V); err != nil {
+			if _, err := app.Append(0, m, s.T, s.V); err != nil {
 				return err
 			}
 			if i == len(smpls)-1 {

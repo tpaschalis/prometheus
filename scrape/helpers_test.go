@@ -31,13 +31,18 @@ func (a nopAppendable) Appender(_ context.Context) storage.Appender {
 
 type nopAppender struct{}
 
-func (a nopAppender) Append(storage.SeriesRef, labels.Labels, metadata.Metadata, int64, float64) (storage.SeriesRef, error) {
+func (a nopAppender) Append(storage.SeriesRef, labels.Labels, int64, float64) (storage.SeriesRef, error) {
 	return 0, nil
 }
 
 func (a nopAppender) AppendExemplar(storage.SeriesRef, labels.Labels, exemplar.Exemplar) (storage.SeriesRef, error) {
 	return 0, nil
 }
+
+func (a nopAppender) AppendMetadata(storage.SeriesRef, metadata.Metadata) (storage.SeriesRef, error) {
+	return 0, nil
+}
+
 func (a nopAppender) Commit() error   { return nil }
 func (a nopAppender) Rollback() error { return nil }
 
@@ -58,7 +63,7 @@ type collectResultAppender struct {
 	resultExemplars  []exemplar.Exemplar
 }
 
-func (a *collectResultAppender) Append(ref storage.SeriesRef, lset labels.Labels, meta metadata.Metadata, t int64, v float64) (storage.SeriesRef, error) {
+func (a *collectResultAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	a.pendingResult = append(a.pendingResult, sample{
 		metric: lset,
 		t:      t,
@@ -72,7 +77,7 @@ func (a *collectResultAppender) Append(ref storage.SeriesRef, lset labels.Labels
 		return ref, nil
 	}
 
-	ref, err := a.next.Append(ref, lset, meta, t, v)
+	ref, err := a.next.Append(ref, lset, t, v)
 	if err != nil {
 		return 0, err
 	}
@@ -86,6 +91,19 @@ func (a *collectResultAppender) AppendExemplar(ref storage.SeriesRef, l labels.L
 	}
 
 	return a.next.AppendExemplar(ref, l, e)
+}
+
+func (a *collectResultAppender) AppendMetadata(ref storage.SeriesRef, m metadata.Metadata) (storage.SeriesRef, error) {
+	// TODO: Add pendingMetadata and resultMetadata fields?
+	// a.pendingMetadata = append(a.pendingMetadata, m)
+	if ref == 0 {
+		ref = storage.SeriesRef(rand.Uint64())
+	}
+	if a.next == nil {
+		return ref, nil
+	}
+
+	return a.next.AppendMetadata(ref, m)
 }
 
 func (a *collectResultAppender) Commit() error {

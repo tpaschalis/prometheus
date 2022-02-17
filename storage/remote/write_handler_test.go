@@ -160,8 +160,7 @@ func (m *mockAppendable) Appender(_ context.Context) storage.Appender {
 	return m
 }
 
-// TODO Check if we need to add metadata to mockSample above
-func (m *mockAppendable) Append(_ storage.SeriesRef, l labels.Labels, meta metadata.Metadata, t int64, v float64) (storage.SeriesRef, error) {
+func (m *mockAppendable) Append(_ storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	if t < m.latestSample {
 		return 0, storage.ErrOutOfOrderSample
 	}
@@ -186,5 +185,17 @@ func (m *mockAppendable) AppendExemplar(_ storage.SeriesRef, l labels.Labels, e 
 
 	m.latestExemplar = e.Ts
 	m.exemplars = append(m.exemplars, mockExemplar{l, e.Labels, e.Ts, e.Value})
+	return 0, nil
+}
+
+// TODO: Wire metadata in a mockAppendable field, if required.
+// Also, check if we have ordering in metadata
+func (m *mockAppendable) AppendMetadata(_ storage.SeriesRef, meta metadata.Metadata) (storage.SeriesRef, error) {
+	// if e.Ts < m.latestExemplar {
+	//	  return 0, storage.ErrOutOfOrderExemplar
+	// }
+	// m.latestMetadata = t
+	// m.metadata = append(m.metadata, mockMetadata{m}
+
 	return 0, nil
 }

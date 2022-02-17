@@ -31,7 +31,6 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/prometheus/prometheus/model/labels"
-	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/model/rulefmt"
 	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/prometheus/prometheus/model/value"
@@ -638,10 +637,8 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 				g.seriesInPreviousEval[i] = seriesReturned
 			}()
 
-			// TODO: Wire in actual metadata
-			meta := metadata.EmptyMetadata()
 			for _, s := range vector {
-				if _, err := app.Append(0, s.Metric, meta, s.T, s.V); err != nil {
+				if _, err := app.Append(0, s.Metric, s.T, s.V); err != nil {
 					rule.SetHealth(HealthBad)
 					rule.SetLastError(err)
 
@@ -670,7 +667,7 @@ func (g *Group) Eval(ctx context.Context, ts time.Time) {
 			for metric, lset := range g.seriesInPreviousEval[i] {
 				if _, ok := seriesReturned[metric]; !ok {
 					// Series no longer exposed, mark it stale.
-					_, err = app.Append(0, lset, meta, timestamp.FromTime(ts), math.Float64frombits(value.StaleNaN))
+					_, err = app.Append(0, lset, timestamp.FromTime(ts), math.Float64frombits(value.StaleNaN))
 					switch errors.Cause(err) {
 					case nil:
 					case storage.ErrOutOfOrderSample, storage.ErrDuplicateSampleForTimestamp:
@@ -694,13 +691,10 @@ func (g *Group) cleanupStaleSeries(ctx context.Context, ts time.Time) {
 		return
 	}
 
-	// TODO: Wire in actual metadata
-	meta := metadata.EmptyMetadata()
-
 	app := g.opts.Appendable.Appender(ctx)
 	for _, s := range g.staleSeries {
 		// Rule that produced series no longer configured, mark it stale.
-		_, err := app.Append(0, s, meta, timestamp.FromTime(ts), math.Float64frombits(value.StaleNaN))
+		_, err := app.Append(0, s, timestamp.FromTime(ts), math.Float64frombits(value.StaleNaN))
 		switch errors.Cause(err) {
 		case nil:
 		case storage.ErrOutOfOrderSample, storage.ErrDuplicateSampleForTimestamp:

@@ -145,14 +145,14 @@ type fanoutAppender struct {
 	secondaries []Appender
 }
 
-func (f *fanoutAppender) Append(ref SeriesRef, l labels.Labels, m metadata.Metadata, t int64, v float64) (SeriesRef, error) {
-	ref, err := f.primary.Append(ref, l, m, t, v)
+func (f *fanoutAppender) Append(ref SeriesRef, l labels.Labels, t int64, v float64) (SeriesRef, error) {
+	ref, err := f.primary.Append(ref, l, t, v)
 	if err != nil {
 		return ref, err
 	}
 
 	for _, appender := range f.secondaries {
-		if _, err := appender.Append(ref, l, m, t, v); err != nil {
+		if _, err := appender.Append(ref, l, t, v); err != nil {
 			return 0, err
 		}
 	}
@@ -167,6 +167,20 @@ func (f *fanoutAppender) AppendExemplar(ref SeriesRef, l labels.Labels, e exempl
 
 	for _, appender := range f.secondaries {
 		if _, err := appender.AppendExemplar(ref, l, e); err != nil {
+			return 0, err
+		}
+	}
+	return ref, nil
+}
+
+func (f *fanoutAppender) AppendMetadata(ref SeriesRef, m metadata.Metadata) (SeriesRef, error) {
+	ref, err := f.primary.AppendMetadata(ref, m)
+	if err != nil {
+		return ref, err
+	}
+
+	for _, appender := range f.secondaries {
+		if _, err := appender.AppendMetadata(ref, m); err != nil {
 			return 0, err
 		}
 	}

@@ -1354,11 +1354,15 @@ func (s *readyStorage) Appender(ctx context.Context) storage.Appender {
 
 type notReadyAppender struct{}
 
-func (n notReadyAppender) Append(ref storage.SeriesRef, l labels.Labels, m metadata.Metadata, t int64, v float64) (storage.SeriesRef, error) {
+func (n notReadyAppender) Append(ref storage.SeriesRef, l labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
 	return 0, tsdb.ErrNotReady
 }
 
 func (n notReadyAppender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e exemplar.Exemplar) (storage.SeriesRef, error) {
+	return 0, tsdb.ErrNotReady
+}
+
+func (n notReadyAppender) AppendMetadata(ref storage.SeriesRef, m metadata.Metadata) (storage.SeriesRef, error) {
 	return 0, tsdb.ErrNotReady
 }
 
