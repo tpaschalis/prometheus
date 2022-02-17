@@ -1459,9 +1459,9 @@ func (sl *scrapeLoop) append(app storage.Appender, b []byte, contentType string,
 loop:
 	for {
 		var (
-			et          textparse.Entry
-			sampleAdded bool
-			hasMetadata bool
+			et                   textparse.Entry
+			sampleAdded          bool
+			shouldAppendMetadata bool
 		)
 		if et, err = p.Next(); err != nil {
 			if err == io.EOF {
@@ -1526,7 +1526,7 @@ loop:
 			if metaOk && metaEntry.lastIterChange == sl.cache.iter {
 				// TODO: I suspect we'll need to add a lastIterChanged for each field, so that
 				// if they get cleared, they're no longer fetched from the cache
-				hasMetadata = true
+				shouldAppendMetadata = true
 				meta.Type = metaEntry.typ
 				meta.Unit = metaEntry.unit
 				meta.Help = metaEntry.help
@@ -1563,7 +1563,7 @@ loop:
 			sl.cache.metaMtx.Lock()
 			metaEntry, metaOk := sl.cache.metadata[yoloString(met)]
 			if metaOk {
-				hasMetadata = true
+				shouldAppendMetadata = true
 				meta.Type = metaEntry.typ
 				meta.Unit = metaEntry.unit
 				meta.Help = metaEntry.help
@@ -1608,7 +1608,7 @@ loop:
 			e = exemplar.Exemplar{} // reset for next time round loop
 		}
 
-		if hasMetadata {
+		if shouldAppendMetadata {
 			_, metadataErr := app.AppendMetadata(ref, lset, meta)
 			if metadataErr != nil {
 				// No need to fail the scrape on errors appending metadata.
