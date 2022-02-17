@@ -887,8 +887,8 @@ type scrapeCache struct {
 	// seriesCur and seriesPrev store the labels of series that were seen
 	// in the current and previous scrape.
 	// We hold two maps and swap them out to save allocations.
-	seriesCur  map[uint64]*cacheEntry
-	seriesPrev map[uint64]*cacheEntry
+	seriesCur  map[uint64]labels.Labels
+	seriesPrev map[uint64]labels.Labels
 
 	metaMtx  sync.Mutex
 	metadata map[string]*metaEntry
@@ -913,8 +913,8 @@ func newScrapeCache() *scrapeCache {
 	return &scrapeCache{
 		series:        map[string]*cacheEntry{},
 		droppedSeries: map[string]*uint64{},
-		seriesCur:     map[uint64]*cacheEntry{},
-		seriesPrev:    map[uint64]*cacheEntry{},
+		seriesCur:     map[uint64]labels.Labels{},
+		seriesPrev:    map[uint64]labels.Labels{},
 		metadata:      map[string]*metaEntry{},
 	}
 }
@@ -1000,17 +1000,14 @@ func (c *scrapeCache) getDropped(met string) bool {
 	return ok
 }
 
-func (c *scrapeCache) trackStaleness(hash uint64, lset labels.Labels, meta metadata.Metadata) {
-	c.seriesCur[hash] = &cacheEntry{
-		lset: lset,
-		meta: meta,
-	}
+func (c *scrapeCache) trackStaleness(hash uint64, lset labels.Labels) {
+	c.seriesCur[hash] = lset
 }
 
-func (c *scrapeCache) forEachStale(f func(labels.Labels, metadata.Metadata) bool) {
-	for h, entry := range c.seriesPrev {
+func (c *scrapeCache) forEachStale(f func(labels.Labels) bool) {
+	for h, lset := range c.seriesPrev {
 		if _, ok := c.seriesCur[h]; !ok {
-			if !f(entry.lset, entry.meta) {
+			if !f(lset) {
 				break
 			}
 		}
@@ -1586,7 +1583,7 @@ loop:
 		if !ok {
 			if tp == nil {
 				// Bypass staleness logic if there is an explicit timestamp.
-				sl.cache.trackStaleness(hash, lset, meta)
+				sl.cache.trackStaleness(hash, lset)
 			}
 			sl.cache.addRef(mets, ref, lset, meta, hash)
 			if sampleAdded && sampleLimitErr == nil {
@@ -1640,8 +1637,7 @@ loop:
 	}
 
 	if err == nil {
-		// TODO: Do we still need metadata as an argument here?
-		sl.cache.forEachStale(func(lset labels.Labels, meta metadata.Metadata) bool {
+		sl.cache.forEachStale(func(lset labels.Labels) bool {
 			// Series no longer exposed, mark it stale.
 			_, err = app.Append(0, lset, defTime, math.Float64frombits(value.StaleNaN))
 			switch errors.Cause(err) {
