@@ -61,6 +61,8 @@ type collectResultAppender struct {
 	rolledbackResult []sample
 	pendingExemplars []exemplar.Exemplar
 	resultExemplars  []exemplar.Exemplar
+	pendingMetadata  []metadata.Metadata
+	resultMetadata   []metadata.Metadata
 }
 
 func (a *collectResultAppender) Append(ref storage.SeriesRef, lset labels.Labels, t int64, v float64) (storage.SeriesRef, error) {
@@ -94,8 +96,7 @@ func (a *collectResultAppender) AppendExemplar(ref storage.SeriesRef, l labels.L
 }
 
 func (a *collectResultAppender) AppendMetadata(ref storage.SeriesRef, l labels.Labels, m metadata.Metadata) (storage.SeriesRef, error) {
-	// TODO: Add pendingMetadata and resultMetadata fields?
-	// a.pendingMetadata = append(a.pendingMetadata, m)
+	a.pendingMetadata = append(a.pendingMetadata, m)
 	if ref == 0 {
 		ref = storage.SeriesRef(rand.Uint64())
 	}
@@ -109,8 +110,10 @@ func (a *collectResultAppender) AppendMetadata(ref storage.SeriesRef, l labels.L
 func (a *collectResultAppender) Commit() error {
 	a.result = append(a.result, a.pendingResult...)
 	a.resultExemplars = append(a.resultExemplars, a.pendingExemplars...)
+	a.resultMetadata = append(a.resultMetadata, a.pendingMetadata...)
 	a.pendingResult = nil
 	a.pendingExemplars = nil
+	a.pendingMetadata = nil
 	if a.next == nil {
 		return nil
 	}
