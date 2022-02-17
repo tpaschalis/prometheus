@@ -1544,9 +1544,9 @@ loop:
 				// and only set the metadata that was specified in _this_ iteration. If any other gields were not
 				// specified, they were treated as zeroed. We have to understand whether we actually need to use this approach
 				// and also take the same approach in the `if ok{` block above.
-				//if metaEntry.lastIterObservedType == currIter {
-				//if metaEntry.lastIterObservedUnit == currIter {
-				//if metaEntry.lastIterObservedHelp == currIter {
+				// if metaEntry.lastIterObservedType == currIter {
+				// if metaEntry.lastIterObservedUnit == currIter {
+				// if metaEntry.lastIterObservedHelp == currIter {
 				meta.Type = metaEntry.typ
 				meta.Unit = metaEntry.unit
 				meta.Help = metaEntry.help

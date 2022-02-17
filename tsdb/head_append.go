@@ -366,7 +366,6 @@ func (a *headAppender) AppendExemplar(ref storage.SeriesRef, lset labels.Labels,
 }
 
 func (a *headAppender) AppendMetadata(ref storage.SeriesRef, meta metadata.Metadata) (storage.SeriesRef, error) {
-
 	// Get Series
 	s := a.head.series.getByID(chunks.HeadSeriesRef(ref))
 
