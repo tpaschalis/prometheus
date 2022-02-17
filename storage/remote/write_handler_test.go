@@ -188,14 +188,8 @@ func (m *mockAppendable) AppendExemplar(_ storage.SeriesRef, l labels.Labels, e 
 	return 0, nil
 }
 
-// TODO: Wire metadata in a mockAppendable field, if required.
-// Also, check if we have ordering in metadata
 func (m *mockAppendable) AppendMetadata(_ storage.SeriesRef, meta metadata.Metadata) (storage.SeriesRef, error) {
-	// if e.Ts < m.latestExemplar {
-	//	  return 0, storage.ErrOutOfOrderExemplar
-	// }
-	// m.latestMetadata = t
-	// m.metadata = append(m.metadata, mockMetadata{m}
-
+	// AppendMetadata is no-op for remote write for now.
+	// TODO: Wire metadata in a mockAppendable field when we get around to it.
 	return 0, nil
 }
