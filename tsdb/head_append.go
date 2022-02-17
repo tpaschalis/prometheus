@@ -376,14 +376,14 @@ func (a *headAppender) AppendMetadata(ref storage.SeriesRef, meta metadata.Metad
 	// 		ref = storage.SeriesRef(s.ref)
 	// 	}
 	// }
+	// (Q from cstyan) this block will result in whatever the last seen metadata
+	// for a series (based on labelset hash) was being used as the metadata for
+	// an entire block, is that right?
 
 	if s == nil {
 		return 0, fmt.Errorf("unknown HeadSeriesRef when trying to add metadata: %d", ref)
 	}
 
-	// (Q from cstyan) this block will result in whatever the last seen metadata
-	// for a series (based on labelset hash) was being used as the metadata for
-	// an entire block, is that right?
 	hasNewMetadata := false
 
 	s.Lock()

@@ -896,10 +896,12 @@ type scrapeCache struct {
 
 // metaEntry holds meta information about a metric.
 type metaEntry struct {
-	lastIter uint64 // Last scrape iteration the entry was observed at.
-	typ      textparse.MetricType
-	help     string
-	unit     string
+	lastIter       uint64 // Last scrape iteration the entry was observed at.
+	lastIterChange uint64 // Last scrape iteration the entry was changed at.
+
+	typ  textparse.MetricType
+	help string
+	unit string
 }
 
 func (m *metaEntry) size() int {
@@ -1023,7 +1025,10 @@ func (c *scrapeCache) setType(metric []byte, t textparse.MetricType) {
 		e = &metaEntry{typ: textparse.MetricTypeUnknown}
 		c.metadata[string(metric)] = e
 	}
-	e.typ = t
+	if e.typ != t {
+		e.typ = t
+		e.lastIterChange = c.iter
+	}
 	e.lastIter = c.iter
 
 	c.metaMtx.Unlock()
@@ -1039,6 +1044,7 @@ func (c *scrapeCache) setHelp(metric, help []byte) {
 	}
 	if e.help != yoloString(help) {
 		e.help = string(help)
+		e.lastIterChange = c.iter
 	}
 	e.lastIter = c.iter
 
@@ -1055,6 +1061,7 @@ func (c *scrapeCache) setUnit(metric, unit []byte) {
 	}
 	if e.unit != yoloString(unit) {
 		e.unit = string(unit)
+		e.lastIterChange = c.iter
 	}
 	e.lastIter = c.iter
 
@@ -1457,6 +1464,7 @@ loop:
 		var (
 			et          textparse.Entry
 			sampleAdded bool
+			hasMetadata bool
 		)
 		if et, err = p.Next(); err != nil {
 			if err == io.EOF {
@@ -1511,7 +1519,23 @@ loop:
 		if ok {
 			ref = ce.ref
 			lset = ce.lset
-			meta = ce.meta
+
+			// Cached series branch - we should only update metadata if it's changed.
+			// We could either compare the cached entry to the the metaEntry set around :1470
+			// with setType/setHelp/setUnit, or use a timestamp to check the last changed iteration.
+			// We need this matching since metaEntry is a different type than metadata.Metadata
+			sl.cache.metaMtx.Lock()
+			metaEntry, metaOk := sl.cache.metadata[yoloString(met)]
+			if metaOk && metaEntry.lastIterChange == sl.cache.iter {
+				// TODO: I suspect we'll need to add a lastIterChanged for each field, so that
+				// if they get cleared, they're no longer fetched from the cache
+				hasMetadata = true
+				meta.Type = metaEntry.typ
+				meta.Unit = metaEntry.unit
+				meta.Help = metaEntry.help
+			}
+			sl.cache.metaMtx.Unlock()
+
 		} else {
 			mets = p.Metric(&lset)
 			hash = lset.Hash()
@@ -1537,16 +1561,12 @@ loop:
 				break loop
 			}
 
+			// This is a new series; if metadata was present, it was cached
+			// by the setType/setUnit/setHelp methods.
 			sl.cache.metaMtx.Lock()
 			metaEntry, metaOk := sl.cache.metadata[yoloString(met)]
 			if metaOk {
-				// Originally, the approach in #7771 was to keep lastIterObserved(Type|Unit|Help) fields
-				// and only set the metadata that was specified in _this_ iteration. If any other gields were not
-				// specified, they were treated as zeroed. We have to understand whether we actually need to use this approach
-				// and also take the same approach in the `if ok{` block above.
-				// if metaEntry.lastIterObservedType == currIter {
-				// if metaEntry.lastIterObservedUnit == currIter {
-				// if metaEntry.lastIterObservedHelp == currIter {
+				hasMetadata = true
 				meta.Type = metaEntry.typ
 				meta.Unit = metaEntry.unit
 				meta.Help = metaEntry.help
@@ -1591,6 +1611,13 @@ loop:
 			e = exemplar.Exemplar{} // reset for next time round loop
 		}
 
+		if hasMetadata {
+			_, metadataErr := app.AppendMetadata(ref, meta)
+			if metadataErr != nil {
+				// No need to fail the scrape on errors appending metadata.
+				level.Debug(sl.l).Log("msg", "Error when appending metadata in scrape loop", "metadata", fmt.Sprintf("%+v", meta), "err", metadataErr)
+			}
+		}
 	}
 	if sampleLimitErr != nil {
 		if err == nil {
