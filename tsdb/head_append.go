@@ -71,8 +71,6 @@ func (a *initAppender) AppendMetadata(ref storage.SeriesRef, m metadata.Metadata
 		return a.app.AppendMetadata(ref, m)
 	}
 
-	// TODO check if we'll be keeping track of time here as well.
-	// a.head.initTime(t)
 	a.app = a.head.appender()
 	return a.app.AppendMetadata(ref, m)
 }

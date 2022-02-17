@@ -1979,11 +1979,6 @@ func (app *errorAppender) Append(ref storage.SeriesRef, lset labels.Labels, t in
 	}
 }
 
-func (app *errorAppender) AppendMetadata(ref storage.SeriesRef, meta metadata.Metadata) (storage.SeriesRef, error) {
-	// TODO Decide correct values to return here
-	return 0, nil
-}
-
 func TestScrapeLoopAppendGracefullyIfAmendOrOutOfOrderOrOutOfBounds(t *testing.T) {
 	app := &errorAppender{}
 
