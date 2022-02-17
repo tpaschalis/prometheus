@@ -66,13 +66,13 @@ func (a *initAppender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e 
 	return a.app.AppendExemplar(ref, l, e)
 }
 
-func (a *initAppender) AppendMetadata(ref storage.SeriesRef, m metadata.Metadata) (storage.SeriesRef, error) {
+func (a *initAppender) AppendMetadata(ref storage.SeriesRef, l labels.Labels, m metadata.Metadata) (storage.SeriesRef, error) {
 	if a.app != nil {
-		return a.app.AppendMetadata(ref, m)
+		return a.app.AppendMetadata(ref, l, m)
 	}
 
 	a.app = a.head.appender()
-	return a.app.AppendMetadata(ref, m)
+	return a.app.AppendMetadata(ref, l, m)
 }
 
 // initTime initializes a head with the first timestamp. This only needs to be called
@@ -377,21 +377,15 @@ func (a *headAppender) AppendExemplar(ref storage.SeriesRef, lset labels.Labels,
 	return storage.SeriesRef(s.ref), nil
 }
 
-func (a *headAppender) AppendMetadata(ref storage.SeriesRef, meta metadata.Metadata) (storage.SeriesRef, error) {
+func (a *headAppender) AppendMetadata(ref storage.SeriesRef, lset labels.Labels, meta metadata.Metadata) (storage.SeriesRef, error) {
 	// Get Series
 	s := a.head.series.getByID(chunks.HeadSeriesRef(ref))
-
-	// TODO: Do we need to add label set so we can get series by their hash?
-	// if s == nil {
-	// 	s = a.head.series.getByHash(lset.Hash(), lset)
-	// 	if s != nil {
-	// 		ref = storage.SeriesRef(s.ref)
-	// 	}
-	// }
-	// (Q from cstyan) this block will result in whatever the last seen metadata
-	// for a series (based on labelset hash) was being used as the metadata for
-	// an entire block, is that right?
-
+	if s == nil {
+		s = a.head.series.getByHash(lset.Hash(), lset)
+		if s != nil {
+			ref = storage.SeriesRef(s.ref)
+		}
+	}
 	if s == nil {
 		return 0, fmt.Errorf("unknown HeadSeriesRef when trying to add metadata: %d", ref)
 	}

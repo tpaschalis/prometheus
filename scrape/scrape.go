@@ -1609,10 +1609,10 @@ loop:
 		}
 
 		if hasMetadata {
-			_, metadataErr := app.AppendMetadata(ref, meta)
+			_, metadataErr := app.AppendMetadata(ref, lset, meta)
 			if metadataErr != nil {
 				// No need to fail the scrape on errors appending metadata.
-				level.Debug(sl.l).Log("msg", "Error when appending metadata in scrape loop", "metadata", fmt.Sprintf("%+v", meta), "err", metadataErr)
+				level.Debug(sl.l).Log("msg", "Error when appending metadata in scrape loop", "ref", fmt.Sprintf("%d", ref), "metadata", fmt.Sprintf("%+v", meta), "err", metadataErr)
 			}
 		}
 	}

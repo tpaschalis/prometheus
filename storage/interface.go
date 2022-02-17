@@ -232,7 +232,7 @@ type MetadataAppender interface {
 	// to Append() at any point. Adding the sample via Append() returns a new
 	// reference number.
 	// If the reference is 0 it must not be used for caching.
-	AppendMetadata(ref SeriesRef, m metadata.Metadata) (SeriesRef, error)
+	AppendMetadata(ref SeriesRef, l labels.Labels, m metadata.Metadata) (SeriesRef, error)
 }
 
 // SeriesSet contains a set of series.
