@@ -270,8 +270,8 @@ func (t *timestampTracker) AppendExemplar(_ storage.SeriesRef, _ labels.Labels, 
 }
 
 func (t *timestampTracker) AppendMetadata(_ storage.SeriesRef, _ labels.Labels, _ metadata.Metadata) (storage.SeriesRef, error) {
+	// TODO: Add and increment a `metadata` field when we get around to wiring metadata in remote_write.
 	// AppendMetadata is no-op for remote write (where timestampTracker is being used) for now.
-	// TODO: Add and increment a `metadata` field when we get around to it.
 	return 0, nil
 }
 
