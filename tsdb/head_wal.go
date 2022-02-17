@@ -184,6 +184,11 @@ func (h *Head) loadWAL(r *wal.Reader, multiRef map[chunks.HeadSeriesRef]chunks.H
 					return
 				}
 				decoded <- exemplars
+			case record.Metadata:
+				var metadata []record.RefMetadata
+				metadata, _ = dec.Metadata(rec, metadata)
+				fmt.Println("Got some metadata while loading the WAL!")
+				fmt.Printf("%#v\n", metadata)
 			default:
 				// Noop.
 			}
