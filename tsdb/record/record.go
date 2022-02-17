@@ -305,37 +305,16 @@ func (e *Encoder) Metadata(metadata []RefMetadata, b []byte) []byte {
 	for _, m := range metadata {
 		buf.PutUvarint64(uint64(m.Ref))
 
-		sizeAfterSeriesRef := buf.Len()
+		// Use a temporary buffer to get the size of the fields
+		// that we're going to encode before writing the fields themselves.
+		tmp := encoding.Encbuf{B: []byte{}}
+		tmp.PutUvarintStr(string(m.Type))
+		tmp.PutUvarintStr(string(m.Unit))
+		tmp.PutUvarintStr(string(m.Help))
 
-		// Reserve space to write the size of the metadata fields
-		// so once we have encoded the fields, we can rewind, write the size
-		// then copy the encoded fields backwards. This allows for the
-		// buffer to be used both for staging the encoding of the
-		// fields, then also moving them into place once size is known
-		// and written to the stream.
-		buf.PutBE64(math.MaxUint64)
-
-		sizeBeforeEncodeFields := buf.Len()
-		buf.PutUvarintStr(string(m.Type))
-		buf.PutUvarintStr(string(m.Unit))
-		buf.PutUvarintStr(string(m.Help))
-		sizeAfterEncodeFields := buf.Len()
-		sizeFieldsWritten := sizeAfterEncodeFields - sizeBeforeEncodeFields
-
-		// Take slice of bytes for encoded fields.
-		b := buf.B
-		encodedFields := b[sizeBeforeEncodeFields:sizeAfterEncodeFields]
-
-		// Rewind the buffer to before any metadata was written and
-		// then encode the size, then copy back the metadata fields into place.
-		buf.B = b[:sizeAfterSeriesRef]
-		// PutUvarint will always use less space than writing fixed size
-		// big endian uint64 that we wrote to the stream to reserve space,
-		// thus not overwriting the byte buffer with the encoded fields content.
-		buf.PutUvarint(sizeFieldsWritten)
-
-		// Copy back the encoded fields into place.
-		buf.B = append(buf.B, encodedFields...)
+		// Write the size of the temporary buffer and copy back the encoded fields into place.
+		buf.PutUvarint(tmp.Len())
+		buf.B = append(buf.B, tmp.B...)
 	}
 
 	return buf.Get()
