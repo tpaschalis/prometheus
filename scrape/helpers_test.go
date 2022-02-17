@@ -39,7 +39,7 @@ func (a nopAppender) AppendExemplar(storage.SeriesRef, labels.Labels, exemplar.E
 	return 0, nil
 }
 
-func (a nopAppender) AppendMetadata(storage.SeriesRef, metadata.Metadata) (storage.SeriesRef, error) {
+func (a nopAppender) AppendMetadata(storage.SeriesRef, labels.Labels, metadata.Metadata) (storage.SeriesRef, error) {
 	return 0, nil
 }
 
@@ -93,7 +93,7 @@ func (a *collectResultAppender) AppendExemplar(ref storage.SeriesRef, l labels.L
 	return a.next.AppendExemplar(ref, l, e)
 }
 
-func (a *collectResultAppender) AppendMetadata(ref storage.SeriesRef, m metadata.Metadata) (storage.SeriesRef, error) {
+func (a *collectResultAppender) AppendMetadata(ref storage.SeriesRef, l labels.Labels, m metadata.Metadata) (storage.SeriesRef, error) {
 	// TODO: Add pendingMetadata and resultMetadata fields?
 	// a.pendingMetadata = append(a.pendingMetadata, m)
 	if ref == 0 {
@@ -103,7 +103,7 @@ func (a *collectResultAppender) AppendMetadata(ref storage.SeriesRef, m metadata
 		return ref, nil
 	}
 
-	return a.next.AppendMetadata(ref, m)
+	return a.next.AppendMetadata(ref, l, m)
 }
 
 func (a *collectResultAppender) Commit() error {
