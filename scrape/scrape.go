@@ -1517,22 +1517,17 @@ loop:
 			ref = ce.ref
 			lset = ce.lset
 
-			// Cached series branch - we should only update metadata if it's changed.
-			// We could either compare the cached entry to the the metaEntry set around :1470
-			// with setType/setHelp/setUnit, or use a timestamp to check the last changed iteration.
-			// We need this matching since metaEntry is a different type than metadata.Metadata
+			// We should only update metadata for cached series if they've
+			// changed in the current iteration.
 			sl.cache.metaMtx.Lock()
 			metaEntry, metaOk := sl.cache.metadata[yoloString(met)]
 			if metaOk && metaEntry.lastIterChange == sl.cache.iter {
-				// TODO: I suspect we'll need to add a lastIterChanged for each field, so that
-				// if they get cleared, they're no longer fetched from the cache
 				shouldAppendMetadata = true
 				meta.Type = metaEntry.typ
 				meta.Unit = metaEntry.unit
 				meta.Help = metaEntry.help
 			}
 			sl.cache.metaMtx.Unlock()
-
 		} else {
 			mets = p.Metric(&lset)
 			hash = lset.Hash()
@@ -1558,8 +1553,6 @@ loop:
 				break loop
 			}
 
-			// This is a new series; if metadata was present, it was cached
-			// by the setType/setUnit/setHelp methods.
 			sl.cache.metaMtx.Lock()
 			metaEntry, metaOk := sl.cache.metadata[yoloString(met)]
 			if metaOk {
