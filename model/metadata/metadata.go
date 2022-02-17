@@ -21,9 +21,3 @@ type Metadata struct {
 	Unit string
 	Help string
 }
-
-var emptyMetadata = Metadata{}
-
-func EmptyMetadata() Metadata {
-	return emptyMetadata
-}

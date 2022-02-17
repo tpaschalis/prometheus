@@ -1813,7 +1813,7 @@ func (sl *scrapeLoop) addReportSample(app storage.Appender, s string, t int64, v
 	switch errors.Cause(err) {
 	case nil:
 		if !ok {
-			sl.cache.addRef(s, ref, lset, metadata.EmptyMetadata(), lset.Hash())
+			sl.cache.addRef(s, ref, lset, metadata.Metadata{}, lset.Hash())
 		}
 		return nil
 	case storage.ErrOutOfOrderSample, storage.ErrDuplicateSampleForTimestamp:
