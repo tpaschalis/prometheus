@@ -1007,6 +1007,18 @@ func makeTestMetrics(n int) []byte {
 	return sb.Bytes()
 }
 
+func makeTestMetricsChangingMetadata(n int) []byte {
+	// Construct a metrics string to parse
+	sb := bytes.Buffer{}
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&sb, "# TYPE metric_a gauge\n")
+		fmt.Fprintf(&sb, "# HELP metric_a help text %d\n", i)
+		fmt.Fprintf(&sb, "# UNIT metric_a unit text %d\n", i)
+		fmt.Fprintf(&sb, "metric_a{foo=\"%d\",bar=\"%d\"} 1\n", i, i*100)
+	}
+	return sb.Bytes()
+}
+
 func BenchmarkScrapeLoopAppend(b *testing.B) {
 	ctx, sl := simpleTestScrapeLoop(b)
 
@@ -1022,19 +1034,52 @@ func BenchmarkScrapeLoopAppend(b *testing.B) {
 	}
 }
 
-func BenchmarkScrapeLoopAppendOM(b *testing.B) {
+func BenchmarkScrapeLoopAppend_MetadataChangesAlways(b *testing.B) {
 	ctx, sl := simpleTestScrapeLoop(b)
 
 	slApp := sl.appender(ctx)
-	metrics := makeTestMetrics(100)
+	metrics := makeTestMetricsChangingMetadata(100)
 	ts := time.Time{}
 
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
 		ts = ts.Add(time.Second)
-		_, _, _, _ = sl.append(slApp, metrics, "application/openmetrics-text", ts)
+		_, _, _, _ = sl.append(slApp, metrics, "", ts)
 	}
+}
+
+func BenchmarkScrapeLoopAppend_MetadataChangesAlwaysContended(b *testing.B) {
+	ctx, sl := simpleTestScrapeLoop(b)
+
+	// Concurrently call ListMetadata() to obtain metaMtx lock
+	ch := make(chan struct{})
+	go func(stopLoop chan struct{}) {
+		for {
+			select {
+			case <-stopLoop:
+				return
+			default:
+				sl.cache.ListMetadata()
+				time.Sleep(1 * time.Millisecond)
+			}
+		}
+	}(ch)
+
+	slApp := sl.appender(ctx)
+	metrics := makeTestMetricsChangingMetadata(100)
+	ts := time.Time{}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		ts = ts.Add(time.Second)
+		_, _, _, _ = sl.append(slApp, metrics, "", ts)
+	}
+
+	// Allow goroutine to exit to avoid goleak failure
+	ch <- struct{}{}
+	time.Sleep(100 * time.Millisecond)
 }
 
 func TestScrapeLoopRunCreatesStaleMarkersOnFailedScrape(t *testing.T) {
