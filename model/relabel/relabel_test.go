@@ -14,10 +14,12 @@
 package relabel
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v2"
 
 	"github.com/prometheus/prometheus/model/labels"
 )
@@ -499,4 +501,28 @@ func TestTargetLabelValidity(t *testing.T) {
 		require.Equal(t, test.valid, relabelTarget.Match([]byte(test.str)),
 			"Expected %q to be %v", test.str, test.valid)
 	}
+}
+
+var bytes []byte
+
+func BenchmarkRegexpDropOriginal(b *testing.B) {
+	b.ReportAllocs()
+	var buf []byte
+
+	yamlRC := `
+- source_labels: [job, __meta_dns_name]
+  regex: "(.*)some-[regex]-%d"
+  action: replace
+  target_label: "job"
+  replacement: "foo-${1}"
+`
+
+	for i := 0; i < b.N; i++ {
+		var cfg []Config
+		rcs := fmt.Sprintf(yamlRC, i)
+		yaml.Unmarshal([]byte(rcs), &cfg)
+		buf, _ = yaml.Marshal(cfg)
+	}
+
+	bytes = buf
 }
