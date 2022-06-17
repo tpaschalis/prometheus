@@ -81,6 +81,11 @@ func (h *Head) loadWAL(r *wal.Reader, multiRef map[chunks.HeadSeriesRef]chunks.H
 				return []record.RefExemplar{}
 			},
 		}
+		metadataPool = sync.Pool{
+			New: func() interface{} {
+				return []record.RefMetadata{}
+			},
+		}
 	)
 
 	defer func() {
@@ -121,6 +126,7 @@ func (h *Head) loadWAL(r *wal.Reader, multiRef map[chunks.HeadSeriesRef]chunks.H
 			if e.T < h.minValidTime.Load() {
 				continue
 			}
+
 			// At the moment the only possible error here is out of order exemplars, which we shouldn't see when
 			// replaying the WAL, so lets just log the error if it's not that type.
 			err = h.exemplars.AddExemplar(ms.lset, exemplar.Exemplar{Ts: e.T, Value: e.V, Labels: e.Labels})
@@ -184,6 +190,18 @@ func (h *Head) loadWAL(r *wal.Reader, multiRef map[chunks.HeadSeriesRef]chunks.H
 					return
 				}
 				decoded <- exemplars
+			case record.Metadata:
+				meta := metadataPool.Get().([]record.RefMetadata)[:0]
+				meta, err = dec.Metadata(rec, meta)
+				if err != nil {
+					decodeErr = &wal.CorruptionErr{
+						Err:     errors.Wrap(err, "decode metadata"),
+						Segment: r.Segment(),
+						Offset:  r.Offset(),
+					}
+					return
+				}
+				decoded <- meta
 			default:
 				// Noop.
 			}
@@ -307,6 +325,9 @@ Outer:
 			}
 			//nolint:staticcheck // Ignore SA6002 relax staticcheck verification.
 			exemplarsPool.Put(v)
+		case []record.RefMetadata:
+			//nolint:staticcheck // Ignore SA6002 relax staticcheck verification.
+			metadataPool.Put(v)
 		default:
 			panic(fmt.Errorf("unexpected decoded type: %T", d))
 		}

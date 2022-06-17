@@ -146,7 +146,7 @@ func TestSegmentWAL_Truncate(t *testing.T) {
 
 	require.NoError(t, r.Read(func(s []record.RefSeries) {
 		readSeries = append(readSeries, s...)
-	}, nil, nil))
+	}, nil, nil, nil))
 
 	require.Equal(t, expected, readSeries)
 }
@@ -212,7 +212,7 @@ func TestSegmentWAL_Log_Restore(t *testing.T) {
 			}
 		}
 
-		require.NoError(t, r.Read(serf, smplf, delf))
+		require.NoError(t, r.Read(serf, smplf, delf, nil))
 
 		require.Equal(t, recordedSamples, resultSamples)
 		require.Equal(t, recordedSeries, resultSeries)
@@ -423,7 +423,7 @@ func TestWALRestoreCorrupted(t *testing.T) {
 				}
 			}
 
-			require.NoError(t, r.Read(serf, samplef, nil))
+			require.NoError(t, r.Read(serf, samplef, nil, nil))
 
 			require.NoError(t, w2.LogSamples([]record.RefSample{{T: 99, V: 100}}))
 			require.NoError(t, w2.Close())
@@ -437,7 +437,7 @@ func TestWALRestoreCorrupted(t *testing.T) {
 			r = w3.Reader()
 
 			i = 0
-			require.NoError(t, r.Read(serf, samplef, nil))
+			require.NoError(t, r.Read(serf, samplef, nil, nil))
 		})
 	}
 }

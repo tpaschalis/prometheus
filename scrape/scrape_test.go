@@ -23,6 +23,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -45,6 +47,7 @@ import (
 	"github.com/prometheus/prometheus/model/timestamp"
 	"github.com/prometheus/prometheus/model/value"
 	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/util/teststorage"
 	"github.com/prometheus/prometheus/util/testutil"
 )
@@ -1008,6 +1011,7 @@ func makeTestMetrics(n int) []byte {
 	sb := bytes.Buffer{}
 	for i := 0; i < n; i++ {
 		fmt.Fprintf(&sb, "# TYPE metric_a gauge\n")
+		fmt.Fprintf(&sb, "# UNIT a custom unit\n")
 		fmt.Fprintf(&sb, "# HELP metric_a help text\n")
 		fmt.Fprintf(&sb, "metric_a{foo=\"%d\",bar=\"%d\"} 1\n", i, i*100)
 	}
@@ -3151,4 +3155,58 @@ func TestTargetScrapeIntervalAndTimeoutRelabel(t *testing.T) {
 
 	require.Equal(t, "3s", sp.ActiveTargets()[0].labels.Get(model.ScrapeIntervalLabel))
 	require.Equal(t, "750ms", sp.ActiveTargets()[0].labels.Get(model.ScrapeTimeoutLabel))
+}
+
+func BenchmarkWALReplaying_WithWithoutMetadata(b *testing.B) {
+	b.ReportAllocs()
+	for _, shouldEnableMetadata := range []bool{false, true} {
+		b.Run(fmt.Sprintf("benchmarking tsdb open with appendMetadataToWAL set to: %t", shouldEnableMetadata),
+			func(b *testing.B) {
+				ctx := context.Background()
+
+				// Open a TestDB
+				tmpdir := b.TempDir()
+				db, err := tsdb.Open(tmpdir, nil, nil, nil, nil)
+				if err != nil {
+					panic(err)
+				}
+
+				// Create a scrape loop, with the switch set to on/off
+				sl := newScrapeLoop(ctx, &testScraper{}, nil, nil, nopMutator, nopMutator, db.Appender, nil, 0, true, 0, nil, 100*time.Millisecond, time.Hour, false, shouldEnableMetadata, nil, nil, false)
+				slApp := sl.appender(ctx)
+
+				now := time.Now()
+				sl.append(slApp, makeTestMetrics(50_000), "", now)
+				slApp.Commit()
+				db.Close()
+
+				size, err := DirSize(filepath.Join(db.Dir(), "wal"))
+				if err != nil {
+					panic(err)
+				}
+				mbSize := float64(size) / float64(1_000_000)
+
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					// Reopen the DB, replaying the WAL each time.
+					b.ReportMetric(mbSize, "wal-size-MB")
+					reopenDB, _ := tsdb.Open(tmpdir, nil, nil, nil, nil)
+					reopenDB.Close()
+				}
+			})
+	}
+}
+
+func DirSize(path string) (int64, error) {
+	var size int64
+	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			size += info.Size()
+		}
+		return err
+	})
+	return size, err
 }

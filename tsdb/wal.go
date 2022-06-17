@@ -107,6 +107,7 @@ type WALReader interface {
 		seriesf func([]record.RefSeries),
 		samplesf func([]record.RefSample),
 		deletesf func([]tombstones.Stone),
+		metadataf func([]record.RefMetadata),
 	) error
 }
 
@@ -233,8 +234,9 @@ func (r *repairingWALReader) Read(
 	seriesf func([]record.RefSeries),
 	samplesf func([]record.RefSample),
 	deletesf func([]tombstones.Stone),
+	metadataf func([]record.RefMetadata),
 ) error {
-	err := r.r.Read(seriesf, samplesf, deletesf)
+	err := r.r.Read(seriesf, samplesf, deletesf, metadataf)
 	if err == nil {
 		return nil
 	}
@@ -870,15 +872,17 @@ func (r *walReader) Read(
 	seriesf func([]record.RefSeries),
 	samplesf func([]record.RefSample),
 	deletesf func([]tombstones.Stone),
+	metadataf func([]record.RefMetadata),
 ) error {
 	// Concurrency for replaying the WAL is very limited. We at least split out decoding and
 	// processing into separate threads.
 	// Historically, the processing is the bottleneck with reading and decoding using only
 	// 15% of the CPU.
 	var (
-		seriesPool sync.Pool
-		samplePool sync.Pool
-		deletePool sync.Pool
+		seriesPool   sync.Pool
+		samplePool   sync.Pool
+		deletePool   sync.Pool
+		metadataPool sync.Pool
 	)
 	donec := make(chan struct{})
 	datac := make(chan interface{}, 100)
@@ -906,6 +910,12 @@ func (r *walReader) Read(
 				}
 				//nolint:staticcheck // Ignore SA6002 safe to ignore and actually fixing it has some performance penalty.
 				deletePool.Put(v[:0])
+			case []record.RefMetadata:
+				if metadataf != nil {
+					metadataf(v)
+				}
+				//nolint:staticcheck // Ignore SA6002 safe to ignore and actually fixing it has some performance penalty.
+				metadataPool.Put(v[:0])
 			default:
 				level.Error(r.logger).Log("msg", "unexpected data type")
 			}
@@ -963,6 +973,7 @@ func (r *walReader) Read(
 					cf.maxTime = s.T
 				}
 			}
+
 		case WALEntryDeletes:
 			var deletes []tombstones.Stone
 			if v := deletePool.Get(); v == nil {
@@ -1285,6 +1296,12 @@ func MigrateWAL(logger log.Logger, dir string) (err error) {
 				return
 			}
 			err = repl.Log(enc.Tombstones(s, b[:0]))
+		},
+		func(s []record.RefMetadata) {
+			if err != nil {
+				return
+			}
+			err = repl.Log(enc.Metadata(s, b[:0]))
 		},
 	)
 	if decErr != nil {
