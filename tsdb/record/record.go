@@ -82,7 +82,7 @@ func GetMetricType(t textparse.MetricType) uint8 {
 	}
 }
 
-var (
+const (
 	unitMetaName = "UNIT"
 	helpMetaName = "HELP"
 )
