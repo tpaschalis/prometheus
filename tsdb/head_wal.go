@@ -30,6 +30,7 @@ import (
 
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
@@ -79,6 +80,11 @@ func (h *Head) loadWAL(r *wal.Reader, multiRef map[chunks.HeadSeriesRef]chunks.H
 		exemplarsPool = sync.Pool{
 			New: func() interface{} {
 				return []record.RefExemplar{}
+			},
+		}
+		metadataPool = sync.Pool{
+			New: func() interface{} {
+				return []record.RefMetadata{}
 			},
 		}
 	)
@@ -184,6 +190,18 @@ func (h *Head) loadWAL(r *wal.Reader, multiRef map[chunks.HeadSeriesRef]chunks.H
 					return
 				}
 				decoded <- exemplars
+			case record.Metadata:
+				meta := metadataPool.Get().([]record.RefMetadata)[:0]
+				meta, err = dec.Metadata(rec, meta)
+				if err != nil {
+					decodeErr = &wal.CorruptionErr{
+						Err:     errors.Wrap(err, "decode metadata"),
+						Segment: r.Segment(),
+						Offset:  r.Offset(),
+					}
+					return
+				}
+				decoded <- meta
 			default:
 				// Noop.
 			}
@@ -307,6 +325,18 @@ Outer:
 			}
 			//nolint:staticcheck // Ignore SA6002 relax staticcheck verification.
 			exemplarsPool.Put(v)
+		case []record.RefMetadata:
+			//nolint:staticcheck // Ignore SA6002 relax staticcheck verification.
+			for _, m := range v {
+				if s := h.series.getByID(chunks.HeadSeriesRef(m.Ref)); s != nil {
+					s.meta = metadata.Metadata{
+						Type: record.ToTextparseMetricType(m.Type),
+						Unit: m.Unit,
+						Help: m.Help,
+					}
+				}
+			}
+			metadataPool.Put(v)
 		default:
 			panic(fmt.Errorf("unexpected decoded type: %T", d))
 		}

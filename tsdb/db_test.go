@@ -3492,7 +3492,7 @@ func TestDBPanicOnMmappingHeadChunk(t *testing.T) {
 }
 
 func TestMetadataFormatOnDisk(t *testing.T) {
-	db := newTestDB(t)
+	db := openTestDB(t, nil, nil)
 	ctx := context.Background()
 
 	// Add some series so we can append metadata to them.
@@ -3570,6 +3570,40 @@ func TestMetadataFormatOnDisk(t *testing.T) {
 	require.Equal(t, expectedMetadata[3:], mb2)
 
 	require.False(t, r.Next(), "the WAL shouldn't contain any more records")
+
+	db.Close()
+
+	// Reopen the DB, replaying the WAL. We must have the same metadata blocks present.
+	reopenDB, err := Open(db.Dir(), nil, nil, nil, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, reopenDB.Close())
+	})
+
+	size, err := reopenDB.head.wal.Size()
+	require.NoError(t, err)
+	require.NotEqual(t, 0, size)
+
+	// Read the WAL records after the replay.
+	var recs []interface{}
+	recs = append(recs, readTestWAL(t, reopenDB.head.wal.Dir())...)
+	var gotMetadataBlocks [][]record.RefMetadata
+	for _, rec := range recs {
+		if _, ok := rec.([]record.RefMetadata); ok {
+			gotMetadataBlocks = append(gotMetadataBlocks, rec.([]record.RefMetadata))
+		}
+	}
+
+	// They should be the same blocks as before.
+	require.Len(t, gotMetadataBlocks, 2)
+	require.Equal(t, expectedMetadata[:3], gotMetadataBlocks[0])
+	require.Equal(t, expectedMetadata[3:], gotMetadataBlocks[1])
+
+	// And the in-memory struct should have been populated with the latest data.
+	require.Equal(t, db.head.series.getByID(1).meta, m1)
+	require.Equal(t, db.head.series.getByID(2).meta, m2)
+	require.Equal(t, db.head.series.getByID(3).meta, m1)
+	require.Equal(t, db.head.series.getByID(4).meta, m2)
 }
 
 func TestMetadataCheckpointingOnlyKeepsLatestEntry(t *testing.T) {
