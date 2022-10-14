@@ -890,6 +890,8 @@ type MetadataConfig struct {
 	SendInterval model.Duration `yaml:"send_interval"`
 	// Maximum number of samples per send.
 	MaxSamplesPerSend int `yaml:"max_samples_per_send,omitempty"`
+
+	SendFromWAL bool
 }
 
 // RemoteReadConfig is the configuration for reading from remote storage.
