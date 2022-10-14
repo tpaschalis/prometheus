@@ -67,6 +67,10 @@ func (wtm *writeToMock) AppendExemplars(e []record.RefExemplar) bool {
 	return true
 }
 
+func (wtm *writeToMock) AppendWALMetadata(m []record.RefMetadata) bool {
+	return true
+}
+
 func (wtm *writeToMock) StoreSeries(series []record.RefSeries, index int) {
 	wtm.UpdateSeriesSegment(series, index)
 }

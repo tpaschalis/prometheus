@@ -49,6 +49,7 @@ type WriteTo interface {
 	// Once returned, the WAL Watcher will not attempt to pass that data again.
 	Append([]record.RefSample) bool
 	AppendExemplars([]record.RefExemplar) bool
+	AppendWALMetadata([]record.RefMetadata) bool
 	StoreSeries([]record.RefSeries, int)
 
 	// Next two methods are intended for garbage-collection: first we call
@@ -478,6 +479,7 @@ func (w *Watcher) readSegment(r *LiveReader, segmentNum int, tail bool) error {
 		samples   []record.RefSample
 		send      []record.RefSample
 		exemplars []record.RefExemplar
+		metadata  []record.RefMetadata
 	)
 	for r.Next() && !isClosed(w.quit) {
 		rec := r.Record()
@@ -535,6 +537,13 @@ func (w *Watcher) readSegment(r *LiveReader, segmentNum int, tail bool) error {
 			}
 			w.writer.AppendExemplars(exemplars)
 
+		case record.Metadata:
+			metadata, err := dec.Metadata(rec, metadata[:0])
+			if err != nil {
+				w.recordDecodeFailsMetric.Inc()
+				return err
+			}
+			w.writer.AppendWALMetadata(metadata)
 		case record.Tombstones:
 
 		default:
