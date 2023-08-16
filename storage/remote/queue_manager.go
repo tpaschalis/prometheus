@@ -1483,10 +1483,12 @@ func (s *shards) populateTimeSeries(batch []timeSeries, pendingData []prompb.Tim
 		// stop reading from the queue. This makes it safe to reference pendingSamples by index.
 		pendingData[nPending].Labels = labelsToLabelsProto(d.seriesLabels, pendingData[nPending].Labels)
 		if s.qm.sendMetadata {
-			pendingData[nPending].Metadata = prompb.Metadata{
-				Type: metricTypeToProtoEquivalent(d.metadata.Type),
-				Help: d.metadata.Help,
-				Unit: d.metadata.Unit,
+			if d.metadata != nil {
+				pendingData[nPending].Metadata = prompb.Metadata{
+					Type: metricTypeToProtoEquivalent(d.metadata.Type),
+					Help: d.metadata.Help,
+					Unit: d.metadata.Unit,
+				}
 			}
 		}
 

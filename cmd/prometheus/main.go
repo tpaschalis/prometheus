@@ -503,7 +503,9 @@ func main() {
 		cfg.tsdb.OutOfOrderTimeWindow = cfgFile.StorageConfig.TSDBConfig.OutOfOrderTimeWindow
 	}
 
+	cfg.scrape.EnableMetadataStorage = true
 	for _, rwc := range cfgFile.RemoteWriteConfigs {
+		rwc.SendWALMetadata = true
 		if rwc.SendWALMetadata && !cfg.scrape.EnableMetadataStorage {
 			level.Warn(logger).Log("msg", "the 'send_metadata' remote_write parameter must be set along the --enable-features=metadata-storage flag to take effect")
 		}
