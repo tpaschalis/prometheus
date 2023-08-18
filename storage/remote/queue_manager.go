@@ -1655,12 +1655,18 @@ func (s *shards) populateReducedTimeSeries(pool *lookupPool, batch []timeSeries,
 		// retries endlessly, so once we reach max samples, if we can never send to the endpoint we'll
 		// stop reading from the queue. This makes it safe to reference pendingSamples by index.
 		// pendingData[nPending].Labels = labelsToLabelsProto(d.seriesLabels, pendingData[nPending].Labels)
-		pendingData[nPending].Labels = make([]prompb.LabelRef, len(d.seriesLabels))
-		for i, sl := range d.seriesLabels {
+		pendingData[nPending].Labels = make([]prompb.LabelRef, d.seriesLabels.Len())
+
+		// NOTE(@tpaschalis) had to change the following code as well as the exemplarLabels
+		// loop below to work with this new Range method.
+		i := 0
+		d.seriesLabels.Range(func(sl labels.Label) {
 			nRef := pool.intern(sl.Name)
 			vRef := pool.intern(sl.Value)
 			pendingData[nPending].Labels[i] = prompb.LabelRef{NameRef: nRef, ValueRef: vRef}
-		}
+			i++
+		})
+
 		switch d.sType {
 		case tSample:
 			pendingData[nPending].Samples = append(pendingData[nPending].Samples, prompb.Sample{
@@ -1669,12 +1675,14 @@ func (s *shards) populateReducedTimeSeries(pool *lookupPool, batch []timeSeries,
 			})
 			nPendingSamples++
 		case tExemplar:
-			l := make([]prompb.LabelRef, len(d.exemplarLabels))
-			for i, el := range d.exemplarLabels {
+			l := make([]prompb.LabelRef, d.exemplarLabels.Len())
+			i := 0
+			d.exemplarLabels.Range(func(el labels.Label) {
 				nRef := pool.intern(el.Name)
 				vRef := pool.intern(el.Value)
 				l[i] = prompb.LabelRef{NameRef: nRef, ValueRef: vRef}
-			}
+				i++
+			})
 			pendingData[nPending].Exemplars = append(pendingData[nPending].Exemplars, prompb.ExemplarRef{
 				Labels:    l,
 				Value:     d.value,
