@@ -1650,6 +1650,9 @@ func (s *shards) populateReducedTimeSeries(pool *lookupPool, batch []timeSeries,
 		if s.qm.sendNativeHistograms {
 			pendingData[nPending].Histograms = pendingData[nPending].Histograms[:0]
 		}
+		if s.qm.sendMetadata {
+			pendingData[nPending].Metadata = prompb.MetadataRef{}
+		}
 
 		// Number of pending samples is limited by the fact that sendSamples (via sendSamplesWithBackoff)
 		// retries endlessly, so once we reach max samples, if we can never send to the endpoint we'll
@@ -1666,6 +1669,17 @@ func (s *shards) populateReducedTimeSeries(pool *lookupPool, batch []timeSeries,
 			pendingData[nPending].Labels[i] = prompb.LabelRef{NameRef: nRef, ValueRef: vRef}
 			i++
 		})
+		if s.qm.sendMetadata {
+			if d.metadata != nil {
+				help := pool.intern(d.metadata.Help)
+				unit := pool.intern(d.metadata.Unit)
+				pendingData[nPending].Metadata = prompb.MetadataRef{
+					Type: metricTypeRefToProtoEquivalent(d.metadata.Type),
+					Help: help,
+					Unit: unit,
+				}
+			}
+		}
 
 		switch d.sType {
 		case tSample:

@@ -808,6 +808,16 @@ func metricTypeToProtoEquivalent(t textparse.MetricType) prompb.Metadata_MetricT
 	return prompb.Metadata_MetricType(v)
 }
 
+func metricTypeRefToProtoEquivalent(t textparse.MetricType) prompb.MetadataRef_MetricType {
+	mt := strings.ToUpper(string(t))
+	v, ok := prompb.Metadata_MetricType_value[mt]
+	if !ok {
+		return prompb.MetadataRef_UNKNOWN
+	}
+
+	return prompb.MetadataRef_MetricType(v)
+}
+
 func metricTypeFromProtoEquivalent(t prompb.Metadata_MetricType) textparse.MetricType {
 	mt := strings.ToLower(t.String())
 	return textparse.MetricType(mt) // TODO(@tpaschalis) a better way for this?
