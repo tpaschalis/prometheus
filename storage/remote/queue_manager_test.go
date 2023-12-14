@@ -1569,7 +1569,7 @@ func TestBuildTimeSeries(t *testing.T) {
 	// Run the test cases
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			highest, lowest, result := buildTimeSeries(tc.ts, tc.filter)
+			highest, lowest, result := buildTimeSeries(nil, tc.ts, tc.filter)
 			require.NotNil(t, result)
 			require.Len(t, result, tc.responseLen)
 			require.Equal(t, tc.highestTs, highest)
