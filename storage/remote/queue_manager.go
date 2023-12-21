@@ -1663,17 +1663,15 @@ func populateMinimizedTimeSeriesStr(symbolTable *rwSymbolTable, batch []timeSeri
 		if sendNativeHistograms {
 			pendingData[nPending].Histograms = pendingData[nPending].Histograms[:0]
 		}
-		if sendMetadata {
-			pendingData[nPending].Metadata = &writev2.Metadata{}
-		}
+
 		// Number of pending samples is limited by the fact that sendSamples (via sendSamplesWithBackoff)
 		// retries endlessly, so once we reach max samples, if we can never send to the endpoint we'll
 		// stop reading from the queue. This makes it safe to reference pendingSamples by index.
 		// pendingData[nPending].Labels = labelsToLabelsProto(d.seriesLabels, pendingData[nPending].Labels)
 
 		pendingData[nPending].LabelsRefs = labelsToUint32SliceStr(d.seriesLabels, symbolTable, pendingData[nPending].LabelsRefs)
-		if sendMetadata {
-			pendingData[nPending].Metadata = &writev2.Metadata{
+		if sendMetadata && d.metadata != nil {
+			pendingData[nPending].Metadata = writev2.Metadata{
 				Type:    metricTypeToProtoEquivalent(d.metadata.Type),
 				HelpRef: symbolTable.RefStr(d.metadata.Help),
 				UnitRef: symbolTable.RefStr(d.metadata.Unit),

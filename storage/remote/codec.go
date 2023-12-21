@@ -630,7 +630,7 @@ func exemplarProtoToExemplar(ep prompb.Exemplar) exemplar.Exemplar {
 	}
 }
 
-func minMetadataProtoToMetadata(mp *writev2.Metadata, symbols []string) metadata.Metadata {
+func minMetadataProtoToMetadata(mp writev2.Metadata, symbols []string) metadata.Metadata {
 	return metadata.Metadata{
 		Type: metricTypeFromProtoEquivalent(mp.Type),
 		Unit: symbols[mp.UnitRef], // TODO: check for overflow
