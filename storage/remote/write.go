@@ -65,6 +65,7 @@ type WriteStorage struct {
 	externalLabels    labels.Labels
 	dir               string
 	queues            map[string]*QueueManager
+	rwFormat          RemoteWriteFormat
 	samplesIn         *ewmaRate
 	flushDeadline     time.Duration
 	interner          *pool
@@ -76,12 +77,13 @@ type WriteStorage struct {
 }
 
 // NewWriteStorage creates and runs a WriteStorage.
-func NewWriteStorage(logger log.Logger, reg prometheus.Registerer, dir string, flushDeadline time.Duration, sm ReadyScrapeManager) *WriteStorage {
+func NewWriteStorage(logger log.Logger, reg prometheus.Registerer, dir string, flushDeadline time.Duration, sm ReadyScrapeManager, rwFormat RemoteWriteFormat) *WriteStorage {
 	if logger == nil {
 		logger = log.NewNopLogger()
 	}
 	rws := &WriteStorage{
 		queues:            make(map[string]*QueueManager),
+		rwFormat:          rwFormat,
 		watcherMetrics:    wlog.NewWatcherMetrics(reg),
 		liveReaderMetrics: wlog.NewLiveReaderMetrics(reg),
 		logger:            logger,
@@ -121,6 +123,16 @@ func (rws *WriteStorage) run() {
 	}
 }
 
+func (rws *WriteStorage) Notify() {
+	rws.mtx.Lock()
+	defer rws.mtx.Unlock()
+
+	for _, q := range rws.queues {
+		// These should all be non blocking
+		q.watcher.Notify()
+	}
+}
+
 // ApplyConfig updates the state as the new config requires.
 // Only stop & create queues which have changes.
 func (rws *WriteStorage) ApplyConfig(conf *config.Config) error {
@@ -154,12 +166,14 @@ func (rws *WriteStorage) ApplyConfig(conf *config.Config) error {
 		}
 
 		c, err := NewWriteClient(name, &ClientConfig{
-			URL:              rwConf.URL,
-			Timeout:          rwConf.RemoteTimeout,
-			HTTPClientConfig: rwConf.HTTPClientConfig,
-			SigV4Config:      rwConf.SigV4Config,
-			Headers:          rwConf.Headers,
-			RetryOnRateLimit: rwConf.QueueConfig.RetryOnRateLimit,
+			URL:               rwConf.URL,
+			RemoteWriteFormat: rws.rwFormat,
+			Timeout:           rwConf.RemoteTimeout,
+			HTTPClientConfig:  rwConf.HTTPClientConfig,
+			SigV4Config:       rwConf.SigV4Config,
+			AzureADConfig:     rwConf.AzureADConfig,
+			Headers:           rwConf.Headers,
+			RetryOnRateLimit:  rwConf.QueueConfig.RetryOnRateLimit,
 		})
 		if err != nil {
 			return err
@@ -197,6 +211,7 @@ func (rws *WriteStorage) ApplyConfig(conf *config.Config) error {
 			rwConf.SendExemplars,
 			rwConf.SendNativeHistograms,
 			rwConf.SendWALMetadata,
+			rws.rwFormat,
 		)
 		// Keep track of which queues are new so we know which to start.
 		newHashes = append(newHashes, hash)
@@ -290,6 +305,11 @@ func (t *timestampTracker) AppendHistogram(_ storage.SeriesRef, _ labels.Labels,
 func (t *timestampTracker) UpdateMetadata(_ storage.SeriesRef, _ labels.Labels, _ metadata.Metadata) (storage.SeriesRef, error) {
 	// TODO: Add and increment a `metadata` field when we get around to wiring metadata in remote_write.
 	// UpadteMetadata is no-op for remote write (where timestampTracker is being used) for now.
+	return 0, nil
+}
+
+func (t *timestampTracker) AppendCTZeroSample(_ storage.SeriesRef, _ labels.Labels, _, _ int64) (storage.SeriesRef, error) {
+	// AppendCTZeroSample is no-op for remote-write for now.
 	return 0, nil
 }
 

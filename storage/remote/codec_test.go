@@ -26,10 +26,12 @@ import (
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/model/textparse"
 	"github.com/prometheus/prometheus/prompb"
+	writev2 "github.com/prometheus/prometheus/prompb/write/v2"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
 	"github.com/prometheus/prometheus/tsdb/tsdbutil"
+	"github.com/prometheus/prometheus/util/annotations"
 )
 
 var testHistogram = histogram.Histogram{
@@ -56,8 +58,7 @@ var writeRequestFixture = &prompb.WriteRequest{
 			},
 			Samples:    []prompb.Sample{{Value: 1, Timestamp: 0}},
 			Exemplars:  []prompb.Exemplar{{Labels: []prompb.Label{{Name: "f", Value: "g"}}, Value: 1, Timestamp: 0}},
-			Histograms: []prompb.Histogram{HistogramToHistogramProto(0, &testHistogram), FloatHistogramToHistogramProto(1, testHistogram.ToFloat())},
-			Metadata:   prompb.Metadata{Type: prompb.Metadata_COUNTER, Help: "help text 1", Unit: "unit text 1"},
+			Histograms: []prompb.Histogram{HistogramToHistogramProto(0, &testHistogram), FloatHistogramToHistogramProto(1, testHistogram.ToFloat(nil))},
 		},
 		{
 			Labels: []prompb.Label{
@@ -69,11 +70,56 @@ var writeRequestFixture = &prompb.WriteRequest{
 			},
 			Samples:    []prompb.Sample{{Value: 2, Timestamp: 1}},
 			Exemplars:  []prompb.Exemplar{{Labels: []prompb.Label{{Name: "h", Value: "i"}}, Value: 2, Timestamp: 1}},
-			Histograms: []prompb.Histogram{HistogramToHistogramProto(2, &testHistogram), FloatHistogramToHistogramProto(3, testHistogram.ToFloat())},
-			Metadata:   prompb.Metadata{Type: prompb.Metadata_GAUGE, Help: "help text 2", Unit: "unit text 2"},
+			Histograms: []prompb.Histogram{HistogramToHistogramProto(2, &testHistogram), FloatHistogramToHistogramProto(3, testHistogram.ToFloat(nil))},
 		},
 	},
 }
+
+// writeRequestMinimizedFixture represents the same request as writeRequestFixture, but using the minimized representation.
+var writeRequestMinimizedFixture = func() *writev2.WriteRequest {
+	st := newRwSymbolTable()
+	var labels []uint32
+	for _, s := range []string{
+		"__name__", "test_metric1",
+		"b", "c",
+		"baz", "qux",
+		"d", "e",
+		"foo", "bar",
+	} {
+		ref := st.RefStr(s)
+		labels = append(labels, ref)
+	}
+	for _, s := range []string{
+		"f", "g", // 10, 11
+		"h", "i", // 12, 13
+		"help text 1", //14
+		"unit text 1", //15
+		"help text 2", //16
+		"unit text 2", //17
+	} {
+		st.RefStr(s)
+	}
+
+	return &writev2.WriteRequest{
+		Timeseries: []writev2.TimeSeries{
+			{
+				LabelsRefs: labels,
+				Samples:    []writev2.Sample{{Value: 1, Timestamp: 0}},
+				Exemplars:  []writev2.Exemplar{{LabelsRefs: []uint32{10, 11}, Value: 1, Timestamp: 0}},
+				Histograms: []writev2.Histogram{HistogramToMinHistogramProto(0, &testHistogram), FloatHistogramToMinHistogramProto(1, testHistogram.ToFloat(nil))},
+				Metadata:   &writev2.Metadata{Type: writev2.Metadata_COUNTER, HelpRef: 14, UnitRef: 15},
+			},
+			{
+				LabelsRefs: labels,
+				Samples:    []writev2.Sample{{Value: 2, Timestamp: 1}},
+				Exemplars:  []writev2.Exemplar{{LabelsRefs: []uint32{12, 13}, Value: 2, Timestamp: 1}},
+				Histograms: []writev2.Histogram{HistogramToMinHistogramProto(2, &testHistogram), FloatHistogramToMinHistogramProto(3, testHistogram.ToFloat(nil))},
+				Metadata:   &writev2.Metadata{Type: writev2.Metadata_GAUGE, HelpRef: 16, UnitRef: 17},
+			},
+		},
+		Symbols: st.LabelsStrings(),
+	}
+}()
 
 func TestValidateLabelsAndMetricName(t *testing.T) {
 	tests := []struct {
@@ -526,7 +572,17 @@ func TestDecodeWriteRequest(t *testing.T) {
 	require.Equal(t, writeRequestFixture, actual)
 }
 
-func TestNilHistogramProto(*testing.T) {
+func TestDecodeMinWriteRequest(t *testing.T) {
+	buf, _, err := buildMinimizedWriteRequestStr(writeRequestMinimizedFixture.Timeseries, writeRequestMinimizedFixture.Symbols, nil, nil)
+
+	require.NoError(t, err)
+
+	actual, err := DecodeMinimizedWriteRequestStr(bytes.NewReader(buf))
+	require.NoError(t, err)
+	require.Equal(t, writeRequestMinimizedFixture, actual)
+}
+
+func TestNilHistogramProto(t *testing.T) {
 	// This function will panic if it impromperly handles nil
 	// values, causing the test to fail.
 	HistogramProtoToHistogram(prompb.Histogram{})
@@ -756,7 +812,7 @@ func TestStreamResponse(t *testing.T) {
 		maxBytesInFrame,
 		&sync.Pool{})
 	require.Nil(t, warning)
-	require.Nil(t, err)
+	require.NoError(t, err)
 	expectData := []*prompb.ChunkedSeries{{
 		Labels: lbs1,
 		Chunks: []prompb.Chunk{chunk, chunk},
@@ -812,7 +868,7 @@ func (c *mockChunkSeriesSet) At() storage.ChunkSeries {
 	}
 }
 
-func (c *mockChunkSeriesSet) Warnings() storage.Warnings { return nil }
+func (c *mockChunkSeriesSet) Warnings() annotations.Annotations { return nil }
 
 func (c *mockChunkSeriesSet) Err() error {
 	return nil
@@ -843,4 +899,12 @@ func (c *mockChunkIterator) Next() bool {
 
 func (c *mockChunkIterator) Err() error {
 	return nil
+}
+
+func TestStrFormat(t *testing.T) {
+	r := newRwSymbolTable()
+	ls := labels.FromStrings("asdf", "qwer", "zxcv", "1234")
+	encoded := labelsToUint32SliceStr(ls, &r, nil)
+	decoded := Uint32StrRefToLabels(r.LabelsStrings(), encoded)
+	require.Equal(t, ls, decoded)
 }

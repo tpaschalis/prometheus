@@ -27,7 +27,7 @@ import (
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/model/labels"
 	"github.com/prometheus/prometheus/prompb"
-	"github.com/prometheus/prometheus/storage"
+	"github.com/prometheus/prometheus/util/annotations"
 )
 
 func TestNoDuplicateReadConfigs(t *testing.T) {
@@ -91,7 +91,8 @@ func TestNoDuplicateReadConfigs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run("", func(t *testing.T) {
-			s := NewStorage(nil, nil, nil, dir, defaultFlushDeadline, nil)
+			// todo: test with new format type(s)?
+			s := NewStorage(nil, nil, nil, dir, defaultFlushDeadline, nil, Base1)
 			conf := &config.Config{
 				GlobalConfig:      config.DefaultGlobalConfig,
 				RemoteReadConfigs: tc.cfgs,
@@ -186,7 +187,7 @@ func TestSeriesSetFilter(t *testing.T) {
 		filtered := newSeriesSetFilter(FromQueryResult(true, tc.in), tc.toRemove)
 		act, ws, err := ToQueryResult(filtered, 1e6)
 		require.NoError(t, err)
-		require.Equal(t, 0, len(ws))
+		require.Empty(t, ws)
 		require.Equal(t, tc.expected, act)
 	}
 }
@@ -469,13 +470,13 @@ func TestSampleAndChunkQueryableClient(t *testing.T) {
 				tc.readRecent,
 				tc.callback,
 			)
-			q, err := c.Querier(context.TODO(), tc.mint, tc.maxt)
+			q, err := c.Querier(tc.mint, tc.maxt)
 			require.NoError(t, err)
 			defer require.NoError(t, q.Close())
 
-			ss := q.Select(true, nil, tc.matchers...)
+			ss := q.Select(context.Background(), true, nil, tc.matchers...)
 			require.NoError(t, err)
-			require.Equal(t, storage.Warnings(nil), ss.Warnings())
+			require.Equal(t, annotations.Annotations(nil), ss.Warnings())
 
 			require.Equal(t, tc.expectedQuery, m.got)
 

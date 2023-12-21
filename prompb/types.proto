@@ -38,27 +38,15 @@ message MetricMetadata {
   string unit = 5;
 }
 
-message Metadata {
-  // The protobuf style guide recommends setting enum values as uppercase.
-  // Having them lowercase would save us an instruction every time we convert
-  // from textparse.MetricType.
-  // https://protobuf.dev/programming-guides/style/#enums
-  enum MetricType {
-    UNKNOWN        = 0;
-    COUNTER        = 1;
-    GAUGE          = 2;
-    HISTOGRAM      = 3;
-    GAUGEHISTOGRAM = 4;
-    SUMMARY        = 5;
-    INFO           = 6;
-    STATESET       = 7;
-  }
-  MetricType type = 1;
-  string help = 2;
-  string unit = 3;
+message Sample {
+  double value    = 1;
+  // timestamp is in ms format, see model/timestamp/timestamp.go for
+  // conversion from time.Time to Prometheus timestamp.
+  int64 timestamp = 2;
 }
 
-message Sample {
+
+message MinSample {
   double value    = 1;
   // timestamp is in ms format, see model/timestamp/timestamp.go for
   // conversion from time.Time to Prometheus timestamp.
@@ -139,6 +127,7 @@ message BucketSpan {
   uint32 length = 2; // Length of consecutive buckets.
 }
 
+
 // TimeSeries represents samples and labels for a single time series.
 message TimeSeries {
   // For a timeseries to be valid, and for the samples and exemplars
@@ -147,7 +136,6 @@ message TimeSeries {
   repeated Sample samples       = 2 [(gogoproto.nullable) = false];
   repeated Exemplar exemplars   = 3 [(gogoproto.nullable) = false];
   repeated Histogram histograms = 4 [(gogoproto.nullable) = false];
-  Metadata metadata             = 5 [(gogoproto.nullable) = false];
 }
 
 message Label {

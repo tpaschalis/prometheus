@@ -14,6 +14,7 @@
 package remote
 
 import (
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,8 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/snappy"
 	"github.com/prometheus/common/model"
+	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
+	"golang.org/x/exp/slices"
 
 	"github.com/prometheus/prometheus/model/exemplar"
 	"github.com/prometheus/prometheus/model/histogram"
@@ -33,13 +36,20 @@ import (
 	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/model/textparse"
 	"github.com/prometheus/prometheus/prompb"
+	writev2 "github.com/prometheus/prometheus/prompb/write/v2"
 	"github.com/prometheus/prometheus/storage"
 	"github.com/prometheus/prometheus/tsdb/chunkenc"
 	"github.com/prometheus/prometheus/tsdb/chunks"
+	"github.com/prometheus/prometheus/util/annotations"
 )
 
-// decodeReadLimit is the maximum size of a read request body in bytes.
-const decodeReadLimit = 32 * 1024 * 1024
+const (
+	// decodeReadLimit is the maximum size of a read request body in bytes.
+	decodeReadLimit = 32 * 1024 * 1024
+
+	pbContentType   = "application/x-protobuf"
+	jsonContentType = "application/json"
+)
 
 type HTTPError struct {
 	msg    string
@@ -115,7 +125,7 @@ func ToQuery(from, to int64, matchers []*labels.Matcher, hints *storage.SelectHi
 }
 
 // ToQueryResult builds a QueryResult proto.
-func ToQueryResult(ss storage.SeriesSet, sampleLimit int) (*prompb.QueryResult, storage.Warnings, error) {
+func ToQueryResult(ss storage.SeriesSet, sampleLimit int) (*prompb.QueryResult, annotations.Annotations, error) {
 	numSamples := 0
 	resp := &prompb.QueryResult{}
 	var iter chunkenc.Iterator
@@ -179,7 +189,9 @@ func FromQueryResult(sortSeries bool, res *prompb.QueryResult) storage.SeriesSet
 	}
 
 	if sortSeries {
-		sort.Sort(byLabel(series))
+		slices.SortFunc(series, func(a, b storage.Series) int {
+			return labels.Compare(a.Labels(), b.Labels())
+		})
 	}
 	return &concreteSeriesSet{
 		series: series,
@@ -215,7 +227,7 @@ func StreamChunkedReadResponses(
 	sortedExternalLabels []prompb.Label,
 	maxBytesInFrame int,
 	marshalPool *sync.Pool,
-) (storage.Warnings, error) {
+) (annotations.Annotations, error) {
 	var (
 		chks []prompb.Chunk
 		lbls []prompb.Label
@@ -314,12 +326,6 @@ func MergeLabels(primary, secondary []prompb.Label) []prompb.Label {
 	return result
 }
 
-type byLabel []storage.Series
-
-func (a byLabel) Len() int           { return len(a) }
-func (a byLabel) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a byLabel) Less(i, j int) bool { return labels.Compare(a[i].Labels(), a[j].Labels()) < 0 }
-
 // errSeriesSet implements storage.SeriesSet, just returning an error.
 type errSeriesSet struct {
 	err error
@@ -337,7 +343,7 @@ func (e errSeriesSet) Err() error {
 	return e.err
 }
 
-func (e errSeriesSet) Warnings() storage.Warnings { return nil }
+func (e errSeriesSet) Warnings() annotations.Annotations { return nil }
 
 // concreteSeriesSet implements storage.SeriesSet.
 type concreteSeriesSet struct {
@@ -358,7 +364,7 @@ func (c *concreteSeriesSet) Err() error {
 	return nil
 }
 
-func (c *concreteSeriesSet) Warnings() storage.Warnings { return nil }
+func (c *concreteSeriesSet) Warnings() annotations.Annotations { return nil }
 
 // concreteSeries implements storage.Series.
 type concreteSeries struct {
@@ -471,7 +477,7 @@ func (c *concreteSeriesIterator) At() (t int64, v float64) {
 	return s.Timestamp, s.Value
 }
 
-// AtHistogram implements chunkenc.Iterator
+// AtHistogram implements chunkenc.Iterator.
 func (c *concreteSeriesIterator) AtHistogram() (int64, *histogram.Histogram) {
 	if c.curValType != chunkenc.ValHistogram {
 		panic("iterator is not on an integer histogram sample")
@@ -480,7 +486,7 @@ func (c *concreteSeriesIterator) AtHistogram() (int64, *histogram.Histogram) {
 	return h.Timestamp, HistogramProtoToHistogram(h)
 }
 
-// AtFloatHistogram implements chunkenc.Iterator
+// AtFloatHistogram implements chunkenc.Iterator.
 func (c *concreteSeriesIterator) AtFloatHistogram() (int64, *histogram.FloatHistogram) {
 	switch c.curValType {
 	case chunkenc.ValHistogram:
@@ -543,7 +549,7 @@ func (c *concreteSeriesIterator) Err() error {
 }
 
 // validateLabelsAndMetricName validates the label names/values and metric names returned from remote read,
-// also making sure that there are no labels with duplicate names
+// also making sure that there are no labels with duplicate names.
 func validateLabelsAndMetricName(ls []prompb.Label) error {
 	for i, l := range ls {
 		if l.Name == labels.MetricName && !model.IsValidMetricName(model.LabelValue(l.Value)) {
@@ -624,11 +630,21 @@ func exemplarProtoToExemplar(ep prompb.Exemplar) exemplar.Exemplar {
 	}
 }
 
-func metadataProtoToMetadata(mp prompb.Metadata) metadata.Metadata {
+func minMetadataProtoToMetadata(mp *writev2.Metadata, symbols []string) metadata.Metadata {
 	return metadata.Metadata{
 		Type: metricTypeFromProtoEquivalent(mp.Type),
-		Unit: mp.Unit,
-		Help: mp.Help,
+		Unit: symbols[mp.UnitRef], // TODO: check for overflow
+		Help: symbols[mp.HelpRef], // TODO: check for overflow
+	}
+}
+func minExemplarProtoToExemplar(ep writev2.Exemplar, symbols []string) exemplar.Exemplar {
+	timestamp := ep.Timestamp
+
+	return exemplar.Exemplar{
+		Labels: Uint32StrRefToLabels(symbols, ep.LabelsRefs),
+		Value:  ep.Value,
+		Ts:     timestamp,
+		HasTs:  timestamp != 0,
 	}
 }
 
@@ -696,7 +712,55 @@ func HistogramProtoToFloatHistogram(hp prompb.Histogram) *histogram.FloatHistogr
 	}
 }
 
+func FloatMinHistogramProtoToFloatHistogram(hp writev2.Histogram) *histogram.FloatHistogram {
+	if !hp.IsFloatHistogram() {
+		panic("FloatHistogramProtoToFloatHistogram called with an integer histogram")
+	}
+	return &histogram.FloatHistogram{
+		CounterResetHint: histogram.CounterResetHint(hp.ResetHint),
+		Schema:           hp.Schema,
+		ZeroThreshold:    hp.ZeroThreshold,
+		ZeroCount:        hp.GetZeroCountFloat(),
+		Count:            hp.GetCountFloat(),
+		Sum:              hp.Sum,
+		PositiveSpans:    minSpansProtoToSpans(hp.GetPositiveSpans()),
+		PositiveBuckets:  hp.GetPositiveCounts(),
+		NegativeSpans:    minSpansProtoToSpans(hp.GetNegativeSpans()),
+		NegativeBuckets:  hp.GetNegativeCounts(),
+	}
+}
+
+// HistogramProtoToHistogram extracts a (normal integer) Histogram from the
+// provided proto message. The caller has to make sure that the proto message
+// represents an integer histogram and not a float histogram, or it panics.
+func MinHistogramProtoToHistogram(hp writev2.Histogram) *histogram.Histogram {
+	if hp.IsFloatHistogram() {
+		panic("HistogramProtoToHistogram called with a float histogram")
+	}
+	return &histogram.Histogram{
+		CounterResetHint: histogram.CounterResetHint(hp.ResetHint),
+		Schema:           hp.Schema,
+		ZeroThreshold:    hp.ZeroThreshold,
+		ZeroCount:        hp.GetZeroCountInt(),
+		Count:            hp.GetCountInt(),
+		Sum:              hp.Sum,
+		PositiveSpans:    minSpansProtoToSpans(hp.GetPositiveSpans()),
+		PositiveBuckets:  hp.GetPositiveDeltas(),
+		NegativeSpans:    minSpansProtoToSpans(hp.GetNegativeSpans()),
+		NegativeBuckets:  hp.GetNegativeDeltas(),
+	}
+}
+
 func spansProtoToSpans(s []prompb.BucketSpan) []histogram.Span {
+	spans := make([]histogram.Span, len(s))
+	for i := 0; i < len(s); i++ {
+		spans[i] = histogram.Span{Offset: s[i].Offset, Length: s[i].Length}
+	}
+
+	return spans
+}
+
+func minSpansProtoToSpans(s []writev2.BucketSpan) []histogram.Span {
 	spans := make([]histogram.Span, len(s))
 	for i := 0; i < len(s); i++ {
 		spans[i] = histogram.Span{Offset: s[i].Offset, Length: s[i].Length}
@@ -731,6 +795,22 @@ func HistogramToHistogramProto(timestamp int64, h *histogram.Histogram) prompb.H
 	}
 }
 
+func HistogramToMinHistogramProto(timestamp int64, h *histogram.Histogram) writev2.Histogram {
+	return writev2.Histogram{
+		Count:          &writev2.Histogram_CountInt{CountInt: h.Count},
+		Sum:            h.Sum,
+		Schema:         h.Schema,
+		ZeroThreshold:  h.ZeroThreshold,
+		ZeroCount:      &writev2.Histogram_ZeroCountInt{ZeroCountInt: h.ZeroCount},
+		NegativeSpans:  spansToMinSpansProto(h.NegativeSpans),
+		NegativeDeltas: h.NegativeBuckets,
+		PositiveSpans:  spansToMinSpansProto(h.PositiveSpans),
+		PositiveDeltas: h.PositiveBuckets,
+		ResetHint:      writev2.Histogram_ResetHint(h.CounterResetHint),
+		Timestamp:      timestamp,
+	}
+}
+
 func FloatHistogramToHistogramProto(timestamp int64, fh *histogram.FloatHistogram) prompb.Histogram {
 	return prompb.Histogram{
 		Count:          &prompb.Histogram_CountFloat{CountFloat: fh.Count},
@@ -747,6 +827,22 @@ func FloatHistogramToHistogramProto(timestamp int64, fh *histogram.FloatHistogra
 	}
 }
 
+func FloatHistogramToMinHistogramProto(timestamp int64, fh *histogram.FloatHistogram) writev2.Histogram {
+	return writev2.Histogram{
+		Count:          &writev2.Histogram_CountFloat{CountFloat: fh.Count},
+		Sum:            fh.Sum,
+		Schema:         fh.Schema,
+		ZeroThreshold:  fh.ZeroThreshold,
+		ZeroCount:      &writev2.Histogram_ZeroCountFloat{ZeroCountFloat: fh.ZeroCount},
+		NegativeSpans:  spansToMinSpansProto(fh.NegativeSpans),
+		NegativeCounts: fh.NegativeBuckets,
+		PositiveSpans:  spansToMinSpansProto(fh.PositiveSpans),
+		PositiveCounts: fh.PositiveBuckets,
+		ResetHint:      writev2.Histogram_ResetHint(fh.CounterResetHint),
+		Timestamp:      timestamp,
+	}
+}
+
 func spansToSpansProto(s []histogram.Span) []prompb.BucketSpan {
 	spans := make([]prompb.BucketSpan, len(s))
 	for i := 0; i < len(s); i++ {
@@ -756,7 +852,16 @@ func spansToSpansProto(s []histogram.Span) []prompb.BucketSpan {
 	return spans
 }
 
-// LabelProtosToMetric unpack a []*prompb.Label to a model.Metric
+func spansToMinSpansProto(s []histogram.Span) []writev2.BucketSpan {
+	spans := make([]writev2.BucketSpan, len(s))
+	for i := 0; i < len(s); i++ {
+		spans[i] = writev2.BucketSpan{Offset: s[i].Offset, Length: s[i].Length}
+	}
+
+	return spans
+}
+
+// LabelProtosToMetric unpack a []*prompb.Label to a model.Metric.
 func LabelProtosToMetric(labelPairs []*prompb.Label) model.Metric {
 	metric := make(model.Metric, len(labelPairs))
 	for _, l := range labelPairs {
@@ -787,6 +892,36 @@ func labelsToLabelsProto(lbls labels.Labels, buf []prompb.Label) []prompb.Label 
 	return result
 }
 
+// TODO.
+func labelsToUint32SliceStr(lbls labels.Labels, symbolTable *rwSymbolTable, buf []uint32) []uint32 {
+	result := buf[:0]
+	lbls.Range(func(l labels.Label) {
+		off := symbolTable.RefStr(l.Name)
+		result = append(result, off)
+		off = symbolTable.RefStr(l.Value)
+		result = append(result, off)
+	})
+	return result
+}
+
+// TODO.
+func Uint32StrRefToLabels(symbols []string, minLabels []uint32) labels.Labels {
+	ls := labels.NewScratchBuilder(len(minLabels) / 2)
+
+	strIdx := 0
+	for strIdx < len(minLabels) {
+		// todo, check for overflow?
+		nameIdx := minLabels[strIdx]
+		strIdx++
+		valueIdx := minLabels[strIdx]
+		strIdx++
+
+		ls.Add(symbols[nameIdx], symbols[valueIdx])
+	}
+
+	return ls.Labels()
+}
+
 // metricTypeToMetricTypeProto transforms a Prometheus metricType into prompb metricType. Since the former is a string we need to transform it to an enum.
 func metricTypeToMetricTypeProto(t textparse.MetricType) prompb.MetricMetadata_MetricType {
 	mt := strings.ToUpper(string(t))
@@ -798,17 +933,17 @@ func metricTypeToMetricTypeProto(t textparse.MetricType) prompb.MetricMetadata_M
 	return prompb.MetricMetadata_MetricType(v)
 }
 
-func metricTypeToProtoEquivalent(t textparse.MetricType) prompb.Metadata_MetricType {
+func metricTypeToProtoEquivalent(t textparse.MetricType) writev2.Metadata_MetricType {
 	mt := strings.ToUpper(string(t))
-	v, ok := prompb.Metadata_MetricType_value[mt]
+	v, ok := writev2.Metadata_MetricType_value[mt]
 	if !ok {
-		return prompb.Metadata_UNKNOWN
+		return writev2.Metadata_UNKNOWN
 	}
 
-	return prompb.Metadata_MetricType(v)
+	return writev2.Metadata_MetricType(v)
 }
 
-func metricTypeFromProtoEquivalent(t prompb.Metadata_MetricType) textparse.MetricType {
+func metricTypeFromProtoEquivalent(t writev2.Metadata_MetricType) textparse.MetricType {
 	mt := strings.ToLower(t.String())
 	return textparse.MetricType(mt) // TODO(@tpaschalis) a better way for this?
 }
@@ -832,4 +967,148 @@ func DecodeWriteRequest(r io.Reader) (*prompb.WriteRequest, error) {
 	}
 
 	return &req, nil
+}
+
+func DecodeOTLPWriteRequest(r *http.Request) (pmetricotlp.ExportRequest, error) {
+	contentType := r.Header.Get("Content-Type")
+	var decoderFunc func(buf []byte) (pmetricotlp.ExportRequest, error)
+	switch contentType {
+	case pbContentType:
+		decoderFunc = func(buf []byte) (pmetricotlp.ExportRequest, error) {
+			req := pmetricotlp.NewExportRequest()
+			return req, req.UnmarshalProto(buf)
+		}
+
+	case jsonContentType:
+		decoderFunc = func(buf []byte) (pmetricotlp.ExportRequest, error) {
+			req := pmetricotlp.NewExportRequest()
+			return req, req.UnmarshalJSON(buf)
+		}
+
+	default:
+		return pmetricotlp.NewExportRequest(), fmt.Errorf("unsupported content type: %s, supported: [%s, %s]", contentType, jsonContentType, pbContentType)
+	}
+
+	reader := r.Body
+	// Handle compression.
+	switch r.Header.Get("Content-Encoding") {
+	case "gzip":
+		gr, err := gzip.NewReader(reader)
+		if err != nil {
+			return pmetricotlp.NewExportRequest(), err
+		}
+		reader = gr
+
+	case "":
+		// No compression.
+
+	default:
+		return pmetricotlp.NewExportRequest(), fmt.Errorf("unsupported compression: %s. Only \"gzip\" or no compression supported", r.Header.Get("Content-Encoding"))
+	}
+
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		r.Body.Close()
+		return pmetricotlp.NewExportRequest(), err
+	}
+	if err = r.Body.Close(); err != nil {
+		return pmetricotlp.NewExportRequest(), err
+	}
+	otlpReq, err := decoderFunc(body)
+	if err != nil {
+		return pmetricotlp.NewExportRequest(), err
+	}
+
+	return otlpReq, nil
+}
+
+func DecodeMinimizedWriteRequestStr(r io.Reader) (*writev2.WriteRequest, error) {
+	compressed, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	reqBuf, err := snappy.Decode(nil, compressed)
+	if err != nil {
+		return nil, err
+	}
+
+	var req writev2.WriteRequest
+	if err := proto.Unmarshal(reqBuf, &req); err != nil {
+		return nil, err
+	}
+
+	return &req, nil
+}
+
+func MinimizedWriteRequestToWriteRequest(redReq *writev2.WriteRequest) (*prompb.WriteRequest, error) {
+	req := &prompb.WriteRequest{
+		Timeseries: make([]prompb.TimeSeries, len(redReq.Timeseries)),
+		// TODO handle metadata?
+	}
+
+	for i, rts := range redReq.Timeseries {
+		Uint32StrRefToLabels(redReq.Symbols, rts.LabelsRefs).Range(func(l labels.Label) {
+			req.Timeseries[i].Labels = append(req.Timeseries[i].Labels, prompb.Label{
+				Name:  l.Name,
+				Value: l.Value,
+			})
+		})
+
+		exemplars := make([]prompb.Exemplar, len(rts.Exemplars))
+		for j, e := range rts.Exemplars {
+			exemplars[j].Value = e.Value
+			exemplars[j].Timestamp = e.Timestamp
+			Uint32StrRefToLabels(redReq.Symbols, e.LabelsRefs).Range(func(l labels.Label) {
+				exemplars[j].Labels = append(exemplars[j].Labels, prompb.Label{
+					Name:  l.Name,
+					Value: l.Value,
+				})
+			})
+		}
+		req.Timeseries[i].Exemplars = exemplars
+
+		req.Timeseries[i].Samples = make([]prompb.Sample, len(rts.Samples))
+		for j, s := range rts.Samples {
+			req.Timeseries[i].Samples[j].Timestamp = s.Timestamp
+			req.Timeseries[i].Samples[j].Value = s.Value
+		}
+
+		req.Timeseries[i].Histograms = make([]prompb.Histogram, len(rts.Histograms))
+		for j, h := range rts.Histograms {
+			// TODO: double check
+			if h.IsFloatHistogram() {
+				req.Timeseries[i].Histograms[j].Count = &prompb.Histogram_CountFloat{CountFloat: h.GetCountFloat()}
+				req.Timeseries[i].Histograms[j].ZeroCount = &prompb.Histogram_ZeroCountFloat{ZeroCountFloat: h.GetZeroCountFloat()}
+			} else {
+				req.Timeseries[i].Histograms[j].Count = &prompb.Histogram_CountInt{CountInt: h.GetCountInt()}
+				req.Timeseries[i].Histograms[j].ZeroCount = &prompb.Histogram_ZeroCountInt{ZeroCountInt: h.GetZeroCountInt()}
+			}
+
+			for _, span := range h.NegativeSpans {
+				req.Timeseries[i].Histograms[j].NegativeSpans = append(req.Timeseries[i].Histograms[j].NegativeSpans, prompb.BucketSpan{
+					Offset: span.Offset,
+					Length: span.Length,
+				})
+			}
+			for _, span := range h.PositiveSpans {
+				req.Timeseries[i].Histograms[j].PositiveSpans = append(req.Timeseries[i].Histograms[j].PositiveSpans, prompb.BucketSpan{
+					Offset: span.Offset,
+					Length: span.Length,
+				})
+			}
+
+			req.Timeseries[i].Histograms[j].Sum = h.Sum
+			req.Timeseries[i].Histograms[j].Schema = h.Schema
+			req.Timeseries[i].Histograms[j].ZeroThreshold = h.ZeroThreshold
+			req.Timeseries[i].Histograms[j].NegativeDeltas = h.NegativeDeltas
+			req.Timeseries[i].Histograms[j].NegativeCounts = h.NegativeCounts
+			req.Timeseries[i].Histograms[j].PositiveDeltas = h.PositiveDeltas
+			req.Timeseries[i].Histograms[j].PositiveCounts = h.PositiveCounts
+			req.Timeseries[i].Histograms[j].ResetHint = prompb.Histogram_ResetHint(h.ResetHint)
+			req.Timeseries[i].Histograms[j].Timestamp = h.Timestamp
+		}
+
+	}
+	return req, nil
 }

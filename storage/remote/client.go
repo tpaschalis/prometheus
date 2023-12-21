@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/prometheus/prometheus/storage/remote/azuread"
 )
 
 const maxErrMsgLen = 1024
@@ -79,8 +81,9 @@ func init() {
 
 // Client allows reading and writing from/to a remote HTTP endpoint.
 type Client struct {
-	remoteName string // Used to differentiate clients in metrics.
-	urlString  string // url.String()
+	remoteName string            // Used to differentiate clients in metrics.
+	urlString  string            // url.String()
+	rwFormat   RemoteWriteFormat // For write clients, ignored for read clients.
 	Client     *http.Client
 	timeout    time.Duration
 
@@ -93,12 +96,14 @@ type Client struct {
 
 // ClientConfig configures a client.
 type ClientConfig struct {
-	URL              *config_util.URL
-	Timeout          model.Duration
-	HTTPClientConfig config_util.HTTPClientConfig
-	SigV4Config      *sigv4.SigV4Config
-	Headers          map[string]string
-	RetryOnRateLimit bool
+	URL               *config_util.URL
+	RemoteWriteFormat RemoteWriteFormat
+	Timeout           model.Duration
+	HTTPClientConfig  config_util.HTTPClientConfig
+	SigV4Config       *sigv4.SigV4Config
+	AzureADConfig     *azuread.AzureADConfig
+	Headers           map[string]string
+	RetryOnRateLimit  bool
 }
 
 // ReadClient uses the SAMPLES method of remote read to read series samples from remote server.
@@ -146,6 +151,13 @@ func NewWriteClient(name string, conf *ClientConfig) (WriteClient, error) {
 		}
 	}
 
+	if conf.AzureADConfig != nil {
+		t, err = azuread.NewAzureADRoundTripper(conf.AzureADConfig, httpClient.Transport)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	if len(conf.Headers) > 0 {
 		t = newInjectHeadersRoundTripper(conf.Headers, t)
 	}
@@ -153,6 +165,7 @@ func NewWriteClient(name string, conf *ClientConfig) (WriteClient, error) {
 	httpClient.Transport = otelhttp.NewTransport(t)
 
 	return &Client{
+		rwFormat:         conf.RemoteWriteFormat,
 		remoteName:       name,
 		urlString:        conf.URL.String(),
 		Client:           httpClient,
@@ -186,7 +199,7 @@ type RecoverableError struct {
 
 // Store sends a batch of samples to the HTTP endpoint, the request is the proto marshalled
 // and encoded bytes from codec.go.
-func (c *Client) Store(ctx context.Context, req []byte) error {
+func (c *Client) Store(ctx context.Context, req []byte, attempt int) error {
 	httpReq, err := http.NewRequest("POST", c.urlString, bytes.NewReader(req))
 	if err != nil {
 		// Errors from NewRequest are from unparsable URLs, so are not
@@ -197,7 +210,18 @@ func (c *Client) Store(ctx context.Context, req []byte) error {
 	httpReq.Header.Add("Content-Encoding", "snappy")
 	httpReq.Header.Set("Content-Type", "application/x-protobuf")
 	httpReq.Header.Set("User-Agent", UserAgent)
-	httpReq.Header.Set("X-Prometheus-Remote-Write-Version", "0.1.0")
+
+	if c.rwFormat == Base1 {
+		httpReq.Header.Set(RemoteWriteVersionHeader, RemoteWriteVersion1HeaderValue)
+	} else {
+		// Set the right header if we're using v1.1 remote write protocol
+		httpReq.Header.Set(RemoteWriteVersionHeader, RemoteWriteVersion11HeaderValue)
+	}
+
+	if attempt > 0 {
+		httpReq.Header.Set("Retry-Attempt", strconv.Itoa(attempt))
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
@@ -215,6 +239,8 @@ func (c *Client) Store(ctx context.Context, req []byte) error {
 		httpResp.Body.Close()
 	}()
 
+	// TODO-RW11: Here is where we need to handle version downgrade on error
+
 	if httpResp.StatusCode/100 != 2 {
 		scanner := bufio.NewScanner(io.LimitReader(httpResp.Body, maxErrMsgLen))
 		line := ""
@@ -223,10 +249,8 @@ func (c *Client) Store(ctx context.Context, req []byte) error {
 		}
 		err = fmt.Errorf("server returned HTTP status %s: %s", httpResp.Status, line)
 	}
-	if httpResp.StatusCode/100 == 5 {
-		return RecoverableError{err, defaultBackoff}
-	}
-	if c.retryOnRateLimit && httpResp.StatusCode == http.StatusTooManyRequests {
+	if httpResp.StatusCode/100 == 5 ||
+		(c.retryOnRateLimit && httpResp.StatusCode == http.StatusTooManyRequests) {
 		return RecoverableError{err, retryAfterDuration(httpResp.Header.Get("Retry-After"))}
 	}
 	return err
@@ -329,4 +353,27 @@ func (c *Client) Read(ctx context.Context, query *prompb.Query) (*prompb.QueryRe
 	}
 
 	return resp.Results[0], nil
+}
+
+type TestClient struct {
+	name string
+	url  string
+}
+
+func NewTestClient(name, url string) WriteClient {
+	return &TestClient{name: name, url: url}
+}
+
+func (c *TestClient) Store(_ context.Context, req []byte, _ int) error {
+	r := rand.Intn(200-100) + 100
+	time.Sleep(time.Duration(r) * time.Millisecond)
+	return nil
+}
+
+func (c *TestClient) Name() string {
+	return c.name
+}
+
+func (c *TestClient) Endpoint() string {
+	return c.url
 }

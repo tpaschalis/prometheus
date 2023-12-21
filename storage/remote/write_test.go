@@ -14,6 +14,9 @@
 package remote
 
 import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -22,6 +25,9 @@ import (
 	common_config "github.com/prometheus/common/config"
 	"github.com/prometheus/common/model"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/collector/pdata/pcommon"
+	"go.opentelemetry.io/collector/pdata/pmetric"
+	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 
 	"github.com/prometheus/prometheus/config"
 	"github.com/prometheus/prometheus/model/labels"
@@ -111,7 +117,8 @@ func TestNoDuplicateWriteConfigs(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		s := NewWriteStorage(nil, nil, dir, time.Millisecond, nil)
+		// todo: test with new format type(s)
+		s := NewWriteStorage(nil, nil, dir, time.Millisecond, nil, Base1)
 		conf := &config.Config{
 			GlobalConfig:       config.DefaultGlobalConfig,
 			RemoteWriteConfigs: tc.cfgs,
@@ -133,7 +140,8 @@ func TestRestartOnNameChange(t *testing.T) {
 	hash, err := toHash(cfg)
 	require.NoError(t, err)
 
-	s := NewWriteStorage(nil, nil, dir, time.Millisecond, nil)
+	// todo: test with new format type(s)
+	s := NewWriteStorage(nil, nil, dir, time.Millisecond, nil, Base1)
 
 	conf := &config.Config{
 		GlobalConfig: config.DefaultGlobalConfig,
@@ -158,7 +166,8 @@ func TestRestartOnNameChange(t *testing.T) {
 func TestUpdateWithRegisterer(t *testing.T) {
 	dir := t.TempDir()
 
-	s := NewWriteStorage(nil, prometheus.NewRegistry(), dir, time.Millisecond, nil)
+	// todo: test with new format type(s)
+	s := NewWriteStorage(nil, prometheus.NewRegistry(), dir, time.Millisecond, nil, Base1)
 	c1 := &config.RemoteWriteConfig{
 		Name: "named",
 		URL: &common_config.URL{
@@ -198,7 +207,8 @@ func TestUpdateWithRegisterer(t *testing.T) {
 func TestWriteStorageLifecycle(t *testing.T) {
 	dir := t.TempDir()
 
-	s := NewWriteStorage(nil, nil, dir, defaultFlushDeadline, nil)
+	// todo: test with new format type(s)
+	s := NewWriteStorage(nil, nil, dir, defaultFlushDeadline, nil, Base1)
 	conf := &config.Config{
 		GlobalConfig: config.DefaultGlobalConfig,
 		RemoteWriteConfigs: []*config.RemoteWriteConfig{
@@ -206,7 +216,7 @@ func TestWriteStorageLifecycle(t *testing.T) {
 		},
 	}
 	require.NoError(t, s.ApplyConfig(conf))
-	require.Equal(t, 1, len(s.queues))
+	require.Len(t, s.queues, 1)
 
 	err := s.Close()
 	require.NoError(t, err)
@@ -215,7 +225,8 @@ func TestWriteStorageLifecycle(t *testing.T) {
 func TestUpdateExternalLabels(t *testing.T) {
 	dir := t.TempDir()
 
-	s := NewWriteStorage(nil, prometheus.NewRegistry(), dir, time.Second, nil)
+	// todo: test with new format type(s)
+	s := NewWriteStorage(nil, prometheus.NewRegistry(), dir, time.Second, nil, Base1)
 
 	externalLabels := labels.FromStrings("external", "true")
 	conf := &config.Config{
@@ -227,14 +238,14 @@ func TestUpdateExternalLabels(t *testing.T) {
 	hash, err := toHash(conf.RemoteWriteConfigs[0])
 	require.NoError(t, err)
 	require.NoError(t, s.ApplyConfig(conf))
-	require.Equal(t, 1, len(s.queues))
-	require.Equal(t, 0, len(s.queues[hash].externalLabels))
+	require.Len(t, s.queues, 1)
+	require.Empty(t, s.queues[hash].externalLabels)
 
 	conf.GlobalConfig.ExternalLabels = externalLabels
 	hash, err = toHash(conf.RemoteWriteConfigs[0])
 	require.NoError(t, err)
 	require.NoError(t, s.ApplyConfig(conf))
-	require.Equal(t, 1, len(s.queues))
+	require.Len(t, s.queues, 1)
 	require.Equal(t, []labels.Label{{Name: "external", Value: "true"}}, s.queues[hash].externalLabels)
 
 	err = s.Close()
@@ -244,8 +255,8 @@ func TestUpdateExternalLabels(t *testing.T) {
 func TestWriteStorageApplyConfigsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 
-	s := NewWriteStorage(nil, nil, dir, defaultFlushDeadline, nil)
-
+	// todo: test with new format type(s)
+	s := NewWriteStorage(nil, nil, dir, defaultFlushDeadline, nil, Base1)
 	conf := &config.Config{
 		GlobalConfig: config.GlobalConfig{},
 		RemoteWriteConfigs: []*config.RemoteWriteConfig{
@@ -256,10 +267,10 @@ func TestWriteStorageApplyConfigsIdempotent(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, s.ApplyConfig(conf))
-	require.Equal(t, 1, len(s.queues))
+	require.Len(t, s.queues, 1)
 
 	require.NoError(t, s.ApplyConfig(conf))
-	require.Equal(t, 1, len(s.queues))
+	require.Len(t, s.queues, 1)
 	_, hashExists := s.queues[hash]
 	require.True(t, hashExists, "Queue pointer should have remained the same")
 
@@ -270,7 +281,8 @@ func TestWriteStorageApplyConfigsIdempotent(t *testing.T) {
 func TestWriteStorageApplyConfigsPartialUpdate(t *testing.T) {
 	dir := t.TempDir()
 
-	s := NewWriteStorage(nil, nil, dir, defaultFlushDeadline, nil)
+	// todo: test with new format type(s)
+	s := NewWriteStorage(nil, nil, dir, defaultFlushDeadline, nil, Base1)
 
 	c0 := &config.RemoteWriteConfig{
 		RemoteTimeout: model.Duration(10 * time.Second),
@@ -306,7 +318,7 @@ func TestWriteStorageApplyConfigsPartialUpdate(t *testing.T) {
 		}
 	}
 	require.NoError(t, s.ApplyConfig(conf))
-	require.Equal(t, 3, len(s.queues))
+	require.Len(t, s.queues, 3)
 
 	hashes := make([]string, len(conf.RemoteWriteConfigs))
 	queues := make([]*QueueManager, len(conf.RemoteWriteConfigs))
@@ -328,7 +340,7 @@ func TestWriteStorageApplyConfigsPartialUpdate(t *testing.T) {
 		RemoteWriteConfigs: []*config.RemoteWriteConfig{c0, c1, c2},
 	}
 	require.NoError(t, s.ApplyConfig(conf))
-	require.Equal(t, 3, len(s.queues))
+	require.Len(t, s.queues, 3)
 
 	_, hashExists := s.queues[hashes[0]]
 	require.False(t, hashExists, "The queue for the first remote write configuration should have been restarted because the relabel configuration has changed.")
@@ -344,7 +356,7 @@ func TestWriteStorageApplyConfigsPartialUpdate(t *testing.T) {
 	c1.HTTPClientConfig.BearerToken = "bar"
 	err := s.ApplyConfig(conf)
 	require.NoError(t, err)
-	require.Equal(t, 3, len(s.queues))
+	require.Len(t, s.queues, 3)
 
 	_, hashExists = s.queues[hashes[0]]
 	require.True(t, hashExists, "Pointer of unchanged queue should have remained the same")
@@ -361,7 +373,7 @@ func TestWriteStorageApplyConfigsPartialUpdate(t *testing.T) {
 		RemoteWriteConfigs: []*config.RemoteWriteConfig{c1, c2},
 	}
 	require.NoError(t, s.ApplyConfig(conf))
-	require.Equal(t, 2, len(s.queues))
+	require.Len(t, s.queues, 2)
 
 	_, hashExists = s.queues[hashes[0]]
 	require.False(t, hashExists, "If a config is removed, the queue should be stopped and recreated.")
@@ -372,4 +384,108 @@ func TestWriteStorageApplyConfigsPartialUpdate(t *testing.T) {
 
 	err = s.Close()
 	require.NoError(t, err)
+}
+
+func TestOTLPWriteHandler(t *testing.T) {
+	exportRequest := generateOTLPWriteRequest(t)
+
+	buf, err := exportRequest.MarshalProto()
+	require.NoError(t, err)
+
+	req, err := http.NewRequest("", "", bytes.NewReader(buf))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/x-protobuf")
+
+	appendable := &mockAppendable{}
+	handler := NewOTLPWriteHandler(nil, appendable)
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+
+	resp := recorder.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	require.Len(t, appendable.samples, 12)   // 1 (counter) + 1 (gauge) + 1 (target_info) + 7 (hist_bucket) + 2 (hist_sum, hist_count)
+	require.Len(t, appendable.histograms, 1) // 1 (exponential histogram)
+	require.Len(t, appendable.exemplars, 1)  // 1 (exemplar)
+}
+
+func generateOTLPWriteRequest(t *testing.T) pmetricotlp.ExportRequest {
+	d := pmetric.NewMetrics()
+
+	// Generate One Counter, One Gauge, One Histogram, One Exponential-Histogram
+	// with resource attributes: service.name="test-service", service.instance.id="test-instance", host.name="test-host"
+	// with metric attibute: foo.bar="baz"
+
+	timestamp := time.Now()
+
+	resourceMetric := d.ResourceMetrics().AppendEmpty()
+	resourceMetric.Resource().Attributes().PutStr("service.name", "test-service")
+	resourceMetric.Resource().Attributes().PutStr("service.instance.id", "test-instance")
+	resourceMetric.Resource().Attributes().PutStr("host.name", "test-host")
+
+	scopeMetric := resourceMetric.ScopeMetrics().AppendEmpty()
+
+	// Generate One Counter
+	counterMetric := scopeMetric.Metrics().AppendEmpty()
+	counterMetric.SetName("test-counter")
+	counterMetric.SetDescription("test-counter-description")
+	counterMetric.SetEmptySum()
+	counterMetric.Sum().SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
+	counterMetric.Sum().SetIsMonotonic(true)
+
+	counterDataPoint := counterMetric.Sum().DataPoints().AppendEmpty()
+	counterDataPoint.SetTimestamp(pcommon.NewTimestampFromTime(timestamp))
+	counterDataPoint.SetDoubleValue(10.0)
+	counterDataPoint.Attributes().PutStr("foo.bar", "baz")
+
+	counterExemplar := counterDataPoint.Exemplars().AppendEmpty()
+	counterExemplar.SetTimestamp(pcommon.NewTimestampFromTime(timestamp))
+	counterExemplar.SetDoubleValue(10.0)
+	counterExemplar.SetSpanID(pcommon.SpanID{0, 1, 2, 3, 4, 5, 6, 7})
+	counterExemplar.SetTraceID(pcommon.TraceID{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})
+
+	// Generate One Gauge
+	gaugeMetric := scopeMetric.Metrics().AppendEmpty()
+	gaugeMetric.SetName("test-gauge")
+	gaugeMetric.SetDescription("test-gauge-description")
+	gaugeMetric.SetEmptyGauge()
+
+	gaugeDataPoint := gaugeMetric.Gauge().DataPoints().AppendEmpty()
+	gaugeDataPoint.SetTimestamp(pcommon.NewTimestampFromTime(timestamp))
+	gaugeDataPoint.SetDoubleValue(10.0)
+	gaugeDataPoint.Attributes().PutStr("foo.bar", "baz")
+
+	// Generate One Histogram
+	histogramMetric := scopeMetric.Metrics().AppendEmpty()
+	histogramMetric.SetName("test-histogram")
+	histogramMetric.SetDescription("test-histogram-description")
+	histogramMetric.SetEmptyHistogram()
+	histogramMetric.Histogram().SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
+
+	histogramDataPoint := histogramMetric.Histogram().DataPoints().AppendEmpty()
+	histogramDataPoint.SetTimestamp(pcommon.NewTimestampFromTime(timestamp))
+	histogramDataPoint.ExplicitBounds().FromRaw([]float64{0.0, 1.0, 2.0, 3.0, 4.0, 5.0})
+	histogramDataPoint.BucketCounts().FromRaw([]uint64{2, 2, 2, 2, 2, 2})
+	histogramDataPoint.SetCount(10)
+	histogramDataPoint.SetSum(30.0)
+	histogramDataPoint.Attributes().PutStr("foo.bar", "baz")
+
+	// Generate One Exponential-Histogram
+	exponentialHistogramMetric := scopeMetric.Metrics().AppendEmpty()
+	exponentialHistogramMetric.SetName("test-exponential-histogram")
+	exponentialHistogramMetric.SetDescription("test-exponential-histogram-description")
+	exponentialHistogramMetric.SetEmptyExponentialHistogram()
+	exponentialHistogramMetric.ExponentialHistogram().SetAggregationTemporality(pmetric.AggregationTemporalityCumulative)
+
+	exponentialHistogramDataPoint := exponentialHistogramMetric.ExponentialHistogram().DataPoints().AppendEmpty()
+	exponentialHistogramDataPoint.SetTimestamp(pcommon.NewTimestampFromTime(timestamp))
+	exponentialHistogramDataPoint.SetScale(2.0)
+	exponentialHistogramDataPoint.Positive().BucketCounts().FromRaw([]uint64{2, 2, 2, 2, 2})
+	exponentialHistogramDataPoint.SetZeroCount(2)
+	exponentialHistogramDataPoint.SetCount(10)
+	exponentialHistogramDataPoint.SetSum(30.0)
+	exponentialHistogramDataPoint.Attributes().PutStr("foo.bar", "baz")
+
+	return pmetricotlp.NewExportRequestFromMetrics(d)
 }
