@@ -39,7 +39,7 @@
     "@codemirror/state": "^6.3.3",
     "@codemirror/view": "^6.29.1",
     "@lezer/common": "^1.2.1",
-    "@lezer/highlight": "^1.2.0",
+    "@lezer/highlight": "^1.2.1",
     "@lezer/lr": "^1.4.2",
     "isomorphic-fetch": "^3.0.0",
     "nock": "^13.5.4"
